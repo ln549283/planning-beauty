@@ -1,0 +1,7 @@
+{
+  "name": "planning-beaute-database-tests",
+  "private": true,
+  "type": "module",
+  "scripts": {"test":"node database.mjs"},
+  "dependencies": {"embedded-postgres":"17.12.0-beta.19","pg":"8.23.1"}
+}

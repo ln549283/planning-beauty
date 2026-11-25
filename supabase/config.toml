@@ -1,0 +1,7 @@
+project_id = "planning-beauty"
+
+[functions.calendrier]
+verify_jwt = false
+
+[functions.rappels]
+verify_jwt = false

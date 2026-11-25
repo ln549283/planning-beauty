@@ -1,34 +1,16 @@
 <!doctype html>
 <html lang="fr">
-<head>
-  <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>Planning beauté</title>
-  <style>
-    :root { color: #30222c; background: #fcf5f8; font: 1rem system-ui, sans-serif; }
-    main { max-width: 38rem; margin: 4rem auto; padding: 0 1rem; }
-    h1 { font: 2.8rem Georgia, serif; }
-    form { display: grid; gap: .8rem; padding: 1.5rem; background: #fff; border-radius: 1rem; }
-    label { display: grid; gap: .3rem; }
-    input, button { font: inherit; padding: .6rem; border-radius: .4rem; border: 1px solid #876a7b; }
-    button { background: #723658; color: white; cursor: pointer; }
-    ul { padding: 0; }
-    li { display: flex; align-items: center; justify-content: space-between; gap: 1rem; padding: .6rem 0; }
-  </style>
-  <script src="planning.js" defer></script>
-</head>
-<body>
-  <main>
-    <h1>Planning beauté</h1>
-    <form id="appointment">
-      <label>Soin <input name="service" required maxlength="100"></label>
-      <label>Date et heure <input name="date" type="datetime-local" required></label>
-      <button>Ajouter le rendez-vous</button>
-    </form>
-    <h2>Rendez-vous</h2>
-    <p id="empty">Aucun rendez-vous enregistré.</p>
-    <p id="error" role="alert" hidden></p>
-    <ul id="appointments"></ul>
-  </main>
-</body>
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width,initial-scale=1" />
+    <meta name="theme-color" content="#104d40" />
+    <title>Planning beauté · Espace institut</title>
+    <link rel="icon" href="/icon.svg" />
+    <link rel="apple-touch-icon" href="/icon-192.png" />
+    <link rel="manifest" href="/manifest.webmanifest" />
+  </head>
+  <body>
+    <div id="root"></div>
+    <script type="module" src="/src/main.tsx"></script>
+  </body>
 </html>
