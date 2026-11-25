@@ -29,6 +29,14 @@ Le client utilise l’URL du projet `eeuvauqtqhtxnrzvggzt` et la clé publique f
 
 Il est aussi possible d’appliquer la migration depuis une CLI Supabase authentifiée avec `supabase link --project-ref eeuvauqtqhtxnrzvggzt`, puis `supabase db push`, en alternative au SQL Editor.
 
+## Authentification sur Render
+
+Dans **Authentication → URL Configuration** du projet Supabase, définir **Site URL** sur `https://planning-beauty-a3zp.onrender.com/`. Ajouter cette adresse dans **Redirect URLs**, ainsi que `https://planning-beauty-a3zp.onrender.com/?invitation=*` pour les invitations. Pour un modèle d’e-mail de confirmation personnalisé, le lien du bouton doit utiliser `{{ .ConfirmationURL }}`. Le formulaire propose « Renvoyer le lien de confirmation » pour un compte déjà inscrit. Après une correction des URL, demander un nouvel e-mail depuis le site Render.
+
+**Google.** Dans Google Cloud, créer un client OAuth de type **Application Web**. Renseigner `https://planning-beauty-a3zp.onrender.com` comme origine JavaScript autorisée et `https://eeuvauqtqhtxnrzvggzt.supabase.co/auth/v1/callback` comme URI de redirection autorisé. Dans Supabase, ouvrir **Authentication → Sign In / Providers → Google**, activer le fournisseur et enregistrer le Client ID et le Client Secret. En mode de test Google, ajouter les adresses autorisées comme utilisatrices de test. Supabase reçoit la réponse de Google puis renvoie la personne sur le site Render.
+
+**Mots de passe.** L’inscription et la réinitialisation contrôlent la confirmation et exigent au moins huit caractères, une majuscule, un chiffre et un symbole. Le projet hébergé gère sa propre politique dans **Authentication → Sign In / Providers → Email**. Y régler aussi le minimum à 8. Pour imposer les catégories côté serveur, le préréglage Supabase « lowercase, uppercase, digits and symbols » exige en plus une minuscule. Les comptes existants gardent leur parcours de connexion habituel.
+
 ## Parcours métier
 
 - **Agenda et réservation** — vues jour et semaine, rendez-vous au comptoir ou en ligne, lien privé pour consulter, déplacer ou annuler. Les horaires, habilitations, blocages et marges sont contrôlés en base. Une contrainte PostgreSQL exclut les réservations simultanées sur une même professionnelle.

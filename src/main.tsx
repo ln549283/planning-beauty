@@ -1,9 +1,15 @@
 import { lazy, Suspense, useEffect, useState } from 'react'
 import { createRoot } from 'react-dom/client'
 import type { Session } from '@supabase/supabase-js'
-import { Check, Eye, EyeOff, ChevronLeft } from 'lucide-react'
+import { Check, ChevronLeft } from 'lucide-react'
 import { db, field, message, rows, rpc, type Institute } from './data'
 import { Brand, Form } from './ui'
+import {
+  callbackMessage,
+  newPassword,
+  PasswordFields,
+  redirectAfterAuth,
+} from './auth'
 const Workspace = lazy(async () => ({
   default: (await import('./workspace')).Workspace,
 }))
@@ -15,14 +21,38 @@ import '@fontsource/instrument-serif/latin-400-italic.css'
 import './style.css'
 
 const params = new URLSearchParams(location.search)
+const initialAuthError = callbackMessage()
 function Auth() {
-  const [mode, setMode] = useState<'login' | 'signup' | 'forgot'>('login'),
-    [show, setShow] = useState(false),
+  const [mode, setMode] = useState<'login' | 'signup' | 'forgot' | 'resend'>(
+      'login',
+    ),
+    [emailValue, setEmailValue] = useState(''),
+    [oauthBusy, setOauthBusy] = useState(false),
+    [authError, setAuthError] = useState(initialAuthError),
     [notice, setNotice] = useState(''),
     [plan, setPlan] = useState('Premium')
   function change(m: typeof mode) {
     setMode(m)
     setNotice('')
+    setAuthError('')
+  }
+  const accountMode = mode === 'login' || mode === 'signup'
+  async function google() {
+    setOauthBusy(true)
+    setAuthError('')
+    try {
+      if (mode === 'signup')
+        sessionStorage.setItem('planning.oauth.offer', plan)
+      else sessionStorage.removeItem('planning.oauth.offer')
+      const { error } = await db.auth.signInWithOAuth({
+        provider: 'google',
+        options: { redirectTo: redirectAfterAuth() },
+      })
+      if (error) throw error
+    } catch (e) {
+      setAuthError(message(e))
+      setOauthBusy(false)
+    }
   }
   return (
     <main className="auth">
@@ -49,16 +79,20 @@ function Auth() {
               ? 'Bienvenue.'
               : mode === 'signup'
                 ? 'Créer mon compte.'
-                : 'Mot de passe oublié.'}
+                : mode === 'resend'
+                  ? 'Confirmer mon adresse.'
+                  : 'Mot de passe oublié.'}
           </h1>
           <p className="muted">
             {mode === 'login'
               ? 'Connectez-vous pour retrouver votre agenda.'
               : mode === 'signup'
                 ? 'Choisissez votre offre et configurez votre institut.'
-                : 'Recevez un lien de réinitialisation par e-mail.'}
+                : mode === 'resend'
+                  ? 'Recevez un nouveau lien de confirmation par e-mail.'
+                  : 'Recevez un lien de réinitialisation par e-mail.'}
           </p>
-          {mode !== 'forgot' && (
+          {accountMode && (
             <nav className="tabs">
               <button
                 className={mode === 'login' ? 'active' : ''}
@@ -74,6 +108,21 @@ function Auth() {
               </button>
             </nav>
           )}
+          {authError && (
+            <p role="alert" className="error">
+              {authError}
+            </p>
+          )}
+          {accountMode && (
+            <button
+              type="button"
+              className="oauth"
+              disabled={oauthBusy}
+              onClick={google}
+            >
+              Continuer avec Google
+            </button>
+          )}
           <Form
             key={mode}
             label={
@@ -86,47 +135,86 @@ function Auth() {
             submit={async (f) => {
               const email = field(f, 'email'),
                 password = String(f.get('password') || '')
+              if (mode === 'resend') {
+                const { error } = await db.auth.resend({
+                  type: 'signup',
+                  email,
+                  options: { emailRedirectTo: redirectAfterAuth() },
+                })
+                if (error) throw error
+                setNotice(
+                  'Si cette adresse attend une confirmation, un nouveau lien vous a été envoyé. Utilisez le dernier e-mail reçu.',
+                )
+                return
+              }
               if (mode === 'forgot') {
                 const { error } = await db.auth.resetPasswordForEmail(email, {
-                  redirectTo: location.origin + location.pathname,
+                  redirectTo: redirectAfterAuth(),
                 })
                 if (error) throw error
                 setNotice('Consultez votre messagerie pour poursuivre.')
                 return
               }
               if (mode === 'signup') {
+                const prenom = field(f, 'prenom'),
+                  nom = field(f, 'nom')
+                if (!prenom || !nom)
+                  throw new Error('Renseignez votre prénom et votre nom.')
                 const { data, error } = await db.auth.signUp({
                   email,
-                  password,
+                  password: newPassword(f),
                   options: {
-                    data: { prenom: field(f, 'prenom'), offre: plan },
-                    emailRedirectTo: location.href.split('#')[0],
+                    data: {
+                      prenom,
+                      nom,
+                      full_name: prenom + ' ' + nom,
+                      offre: plan,
+                    },
+                    emailRedirectTo: redirectAfterAuth(),
                   },
                 })
                 if (error) throw error
-                if (!data.session)
+                if (!data.session) {
+                  change('resend')
                   setNotice(
                     'Confirmez votre adresse avec le lien reçu par e-mail.',
                   )
+                }
                 return
               }
               const { error } = await db.auth.signInWithPassword({
                 email,
                 password,
               })
+              if (error?.code === 'email_not_confirmed') {
+                change('resend')
+                setNotice('Votre adresse attend encore sa confirmation.')
+                return
+              }
               if (error) throw error
             }}
           >
             {mode === 'signup' && (
-              <label>
-                Votre prénom
-                <input
-                  name="prenom"
-                  autoComplete="given-name"
-                  required
-                  maxLength={100}
-                />
-              </label>
+              <div className="pair">
+                <label>
+                  Votre prénom
+                  <input
+                    name="prenom"
+                    autoComplete="given-name"
+                    required
+                    maxLength={100}
+                  />
+                </label>
+                <label>
+                  Votre nom
+                  <input
+                    name="nom"
+                    autoComplete="family-name"
+                    required
+                    maxLength={100}
+                  />
+                </label>
+              </div>
             )}
             <label>
               Adresse e-mail
@@ -134,37 +222,13 @@ function Auth() {
                 type="email"
                 autoComplete="email"
                 name="email"
+                value={emailValue}
+                onChange={(e) => setEmailValue(e.target.value)}
                 placeholder="vous@exemple.fr"
                 required
               />
             </label>
-            {mode !== 'forgot' && (
-              <label>
-                Mot de passe
-                <div className="password">
-                  <input
-                    name="password"
-                    type={show ? 'text' : 'password'}
-                    autoComplete={
-                      mode === 'login' ? 'current-password' : 'new-password'
-                    }
-                    required
-                    minLength={mode === 'signup' ? 8 : 1}
-                  />
-                  <button
-                    type="button"
-                    aria-label={
-                      show
-                        ? 'Masquer le mot de passe'
-                        : 'Afficher le mot de passe'
-                    }
-                    onClick={() => setShow(!show)}
-                  >
-                    {show ? <EyeOff size={18} /> : <Eye size={18} />}
-                  </button>
-                </div>
-              </label>
-            )}
+            {accountMode && <PasswordFields creating={mode === 'signup'} />}
             {mode === 'login' && (
               <button
                 className="text-link right"
@@ -189,7 +253,12 @@ function Auth() {
               {notice}
             </p>
           )}
-          {mode === 'forgot' && (
+          {mode === 'login' && (
+            <button className="text-link" onClick={() => change('resend')}>
+              Renvoyer le lien de confirmation
+            </button>
+          )}
+          {!accountMode && (
             <button className="text-link" onClick={() => change('login')}>
               <ChevronLeft size={14} /> Retour à la connexion
             </button>
@@ -229,7 +298,12 @@ function Home({ session }: { session: Session }) {
     [creating, setCreating] = useState(false),
     [err, setErr] = useState('')
   const [offer, setOffer] = useState(
-    session.user.user_metadata.offre === 'Solo' ? 'Solo' : 'Premium',
+    (session.user.user_metadata.offre ??
+      (session.user.app_metadata.provider === 'google'
+        ? sessionStorage.getItem('planning.oauth.offer')
+        : null)) === 'Solo'
+      ? 'Solo'
+      : 'Premium',
   )
   async function refresh() {
     const list = await rows<Institute>('instituts')
@@ -241,6 +315,9 @@ function Home({ session }: { session: Session }) {
   useEffect(() => {
     refresh().catch((e) => setErr(message(e)))
   }, [session.user.id])
+  const needsGoogleName =
+    session.user.app_metadata.provider === 'google' &&
+    !session.user.user_metadata.nom
   const institute = institutes?.find((v) => v.id === id)
   const invite = params.get('invitation')
   if (invite || creating || institutes?.length === 0)
@@ -252,6 +329,16 @@ function Home({ session }: { session: Session }) {
           <Form
             label={invite ? 'Accepter l’invitation' : 'Créer mon institut'}
             submit={async (f) => {
+              if (needsGoogleName) {
+                const prenom = field(f, 'prenom'),
+                  nom = field(f, 'familyName')
+                if (!prenom || !nom)
+                  throw new Error('Renseignez votre prénom et votre nom.')
+                const { error } = await db.auth.updateUser({
+                  data: { prenom, nom, full_name: prenom + ' ' + nom },
+                })
+                if (error) throw error
+              }
               const newId = invite
                 ? await rpc<string>('rejoindre', {
                     t: invite,
@@ -266,6 +353,7 @@ function Home({ session }: { session: Session }) {
                 params.delete('invitation')
                 history.replaceState(null, '', location.pathname)
               }
+              sessionStorage.removeItem('planning.oauth.offer')
               await refresh()
               setId(newId)
               setCreating(false)
@@ -275,11 +363,26 @@ function Home({ session }: { session: Session }) {
               Votre prénom
               <input
                 name="prenom"
-                defaultValue={session.user.user_metadata.prenom}
+                defaultValue={
+                  session.user.user_metadata.prenom ??
+                  session.user.user_metadata.given_name
+                }
                 required
                 maxLength={100}
               />
             </label>
+            {needsGoogleName && (
+              <label>
+                Votre nom
+                <input
+                  name="familyName"
+                  autoComplete="family-name"
+                  defaultValue={session.user.user_metadata.family_name}
+                  required
+                  maxLength={100}
+                />
+              </label>
+            )}
             {!invite && (
               <>
                 <label>
@@ -350,16 +453,13 @@ function App() {
           <Form
             submit={async (f) => {
               const { error } = await db.auth.updateUser({
-                password: String(f.get('password')),
+                password: newPassword(f),
               })
               if (error) throw error
               setReset(false)
             }}
           >
-            <label>
-              Mot de passe
-              <input type="password" minLength={8} required name="password" />
-            </label>
+            <PasswordFields creating />
           </Form>
         </article>
       </main>

@@ -752,3 +752,5 @@ span {
   );
   color: #56695c;
 }
+.oauth { width:100%; font-weight:600; margin-top:.25rem; }
+.password { margin-top:.48rem; }
