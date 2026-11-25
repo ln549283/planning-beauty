@@ -1,0 +1,7 @@
+services:
+  - type: web
+    name: planning-beauty
+    runtime: static
+    branch: main
+    buildCommand: npm ci --include=dev && npm run build
+    staticPublishPath: ./dist

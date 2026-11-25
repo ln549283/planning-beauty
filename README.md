@@ -13,6 +13,12 @@ npm run dev
 
 Le serveur écoute sur le port 8000. La commande `npm run build` vérifie TypeScript et produit le répertoire statique `dist/` à publier sur un hébergement HTTPS. La commande `npm run preview` permet de vérifier la version de production localement.
 
+### Déploiement sur Render
+
+Pour un nouveau site, choisir **New → Blueprint** et sélectionner ce dépôt sur la branche `main`. Render lit les paramètres dans [render.yaml](render.yaml).
+
+Pour un **Static Site** déjà créé manuellement, ouvrir **Settings → Build & Deploy**. Laisser **Root Directory** vide, saisir `npm ci --include=dev && npm run build` dans **Build Command** et `dist` dans **Publish Directory**. Enregistrer, puis choisir **Manual Deploy → Deploy latest commit**.
+
 ## Activer la base Supabase
 
 Le client utilise l’URL du projet `eeuvauqtqhtxnrzvggzt` et la clé publique fournie. Pour un autre projet, copier `.env.example` vers `.env.local`, renseigner les deux valeurs et reconstruire le site. Les clés administratives restent exclusivement côté serveur.
