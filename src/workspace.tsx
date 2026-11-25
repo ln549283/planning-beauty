@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useState, useRef } from 'react'
 import {
   BarChart3,
   BookOpen,
@@ -36,12 +36,15 @@ import {
   link,
   loadState,
   message,
+  rpc,
   today,
   theme,
   type Institute,
   type State,
 } from './data'
 import { Brand, Empty, Heading } from './ui'
+import { Notes, Materiel, LoyaltySettings, Loyalty } from './quotidien'
+import { PaymentSettings } from './payments'
 const nav = [
   ['Agenda', CalendarDays],
   ['Préparer ma journée', ClipboardList],
@@ -69,11 +72,18 @@ export function Workspace({
   refreshInstitute: () => Promise<void>
 }) {
   const [s, setState] = useState<State>(),
-    [page, setPage] = useState<string>('Agenda'),
+    [page, setPage] = useState<string>(
+      new URLSearchParams(location.search).get('marchand') === a.id
+        ? 'Paramètres'
+        : 'Agenda',
+    ),
     [err, setErr] = useState(''),
     [menu, setMenu] = useState(false)
+  const generation = useRef(0)
   const reload = useCallback(async () => {
+    const attempt = ++generation.current
     const fresh = await loadState(a.id)
+    if (attempt !== generation.current) return
     setState(fresh)
     setErr('')
   }, [a.id])
@@ -83,7 +93,14 @@ export function Workspace({
     }
     read()
     window.addEventListener('focus', read)
-    return () => window.removeEventListener('focus', read)
+    const timer = window.setInterval(() => {
+      if (document.visibilityState === 'visible') read()
+    }, 60000)
+    return () => {
+      generation.current++
+      window.clearInterval(timer)
+      window.removeEventListener('focus', read)
+    }
   }, [reload])
   const me = s?.members.find((m) => m.personne === user),
     owner = me?.role === 'gerante'
@@ -165,6 +182,7 @@ export function Workspace({
               <>
                 <Team {...props} />
                 <CalendarFeed a={a} />
+                {me?.role === 'responsable' && <Exceptions {...props} />}
               </>
             )}
             {page === 'Cartes cadeaux' && owner && <Cards {...props} />}
@@ -180,6 +198,10 @@ export function Workspace({
                 />
                 <Exceptions {...props} />
                 <ExportData {...props} />
+                {a.offre === 'Premium' && (
+                  <LoyaltySettings a={a} refresh={refreshInstitute} />
+                )}
+                <PaymentSettings id={a.id} premium={a.offre === 'Premium'} />
                 <Offer a={a} refreshInstitute={refreshInstitute} />
               </>
             )}
@@ -223,11 +245,14 @@ export function Workspace({
     </div>
   )
 }
-function Prepare({ a, s }: PageProps) {
+function Prepare({ a, s, user }: PageProps) {
   const next =
     Array.from({ length: 7 }, (_, n) => dayAdd(today(), n + 1)).find(
       (d) =>
-        a.horaires[isoDay(d)] ||
+        (a.horaires[isoDay(d)]?.length &&
+          !s.exceptions.some(
+            (x) => !x.personne && x.jour === d && !x.plages.length,
+          )) ||
         s.visits.some((v) => v.debut.startsWith(d) && v.statut === 'confirmé'),
     ) || dayAdd(today(), 1)
   const [day, setDay] = useState(next)
@@ -258,12 +283,27 @@ function Prepare({ a, s }: PageProps) {
         <div className="eyebrow">{dayName(day)}</div>
         <h2>{visits.length} rendez-vous</h2>
         <p>{visits.reduce((n, v) => n + v.minutes, 0)} minutes de soins</p>
+        {s.members.some((m) => m.personne === user && m.role === 'gerante') && (
+          <p>
+            Valeur prévue · {eur(visits.reduce((n, v) => n + v.centimes, 0))}
+          </p>
+        )}
+        {Array.from(new Set(visits.map((v) => v.libelle))).map((nom) => (
+          <p key={nom}>
+            {visits.filter((v) => v.libelle === nom).length} × {nom}
+          </p>
+        ))}
         {visits.map((v) => (
           <div className="listrow" key={v.id}>
             <b>{hour(v.debut)}</b>
             <span>
               {v.libelle} · {s.clients.find((c) => c.id === v.cliente_id)?.nom}
             </span>
+            {s.clients.find((c) => c.id === v.cliente_id)?.notes && (
+              <small>
+                {s.clients.find((c) => c.id === v.cliente_id)?.notes}
+              </small>
+            )}
             {!s.visits.some(
               (x) =>
                 x.cliente_id === v.cliente_id &&
@@ -273,21 +313,11 @@ function Prepare({ a, s }: PageProps) {
           </div>
         ))}
       </section>
-      {kit.length > 0 && (
-        <section className="paper" key={day}>
-          <h2>Matériel à préparer</h2>
-          {kit.map((k) => (
-            <label key={k} className="check">
-              <input type="checkbox" />
-              {k}
-            </label>
-          ))}
-        </section>
-      )}
+      {kit.length > 0 && <Materiel key={day} id={a.id} day={day} kit={kit} />}
     </>
   )
 }
-function Clients({ s, user }: PageProps) {
+function Clients({ a, s, user, reload }: PageProps) {
   const [q, setQ] = useState(''),
     [id, setId] = useState('')
   const person = s.clients.find((c) => c.id === id)
@@ -326,6 +356,11 @@ function Clients({ s, user }: PageProps) {
         <section className="paper">
           <h2>{person.nom}</h2>
           <p>{person.email}</p>
+          <Notes key={person.id} client={person} reload={reload} />
+          {a.offre === 'Premium' &&
+            s.members.some(
+              (m) => m.personne === user && m.role === 'gerante',
+            ) && <Loyalty key={'points' + person.id} client={person.id} />}
           <h3>Historique</h3>
           {s.visits
             .filter((v) => v.cliente_id === id)
@@ -362,22 +397,70 @@ function Clients({ s, user }: PageProps) {
   )
 }
 function Stats({ a, s }: PageProps) {
-  const [month, setMonth] = useState(today().slice(0, 7)),
-    [who, setWho] = useState('')
+  const month = today().slice(0, 7)
+  const [from, setFrom] = useState(month + '-01'),
+    [to, setTo] = useState(
+      new Date(Date.UTC(Number(month.slice(0, 4)), Number(month.slice(5)), 0))
+        .toISOString()
+        .slice(0, 10),
+    ),
+    [who, setWho] = useState(''),
+    [service, setService] = useState('')
+  const [capacity, setCapacity] = useState<{
+      ouvrables: number
+      occupees: number
+    }>(),
+    [error, setError] = useState('')
+  const premium = a.offre === 'Premium'
+  useEffect(() => {
+    let live = true
+    setCapacity(undefined)
+    setError('')
+    if (premium && from && to)
+      rpc<{ ouvrables: number; occupees: number }>('occupation', {
+        i: a.id,
+        j: from,
+        f: to,
+        p: who || null,
+      })
+        .then((x) => {
+          if (live) setCapacity(x)
+        })
+        .catch((e) => {
+          if (live) setError(message(e))
+        })
+    return () => {
+      live = false
+    }
+  }, [a.id, premium, from, to, who, s])
+  const within = (date: string) => date >= from && date <= to
+  const matches = (v: State['visits'][number]) =>
+    (!who || v.personne === who) && (!service || v.soin_id === service)
   const visits = s.visits.filter(
-      (v) => v.debut.startsWith(month) && (!who || v.personne === who),
+      (v) =>
+        within(v.debut.slice(0, 10)) &&
+        matches(v) &&
+        !['en paiement', 'expiré'].includes(v.statut),
     ),
     completed = visits.filter((v) => v.statut === 'réalisé')
+  const dateFormatter = new Intl.DateTimeFormat('sv-SE', {
+    timeZone: 'Indian/Reunion',
+  })
+  const matchingIds = new Set(s.visits.filter(matches).map((v) => v.id))
   const cash = s.money
     .filter(
       (m) =>
-        new Intl.DateTimeFormat('sv-SE', { timeZone: 'Indian/Reunion' })
-          .format(new Date(m.created_at))
-          .startsWith(month) &&
+        within(dateFormatter.format(new Date(m.created_at))) &&
         ['encaissement', 'vente carte'].includes(m.type) &&
-        (!who || s.visits.some((v) => v.id === m.rdv && v.personne === who)),
+        ((!who && !service) || matchingIds.has(m.rdv)),
     )
     .reduce((n, m) => n + m.centimes, 0)
+  const distinctClients = new Set(completed.map((v) => v.cliente_id))
+  const returning = new Set(
+    s.visits
+      .filter((v) => v.statut === 'réalisé' && v.debut.slice(0, 10) < from)
+      .map((v) => v.cliente_id),
+  )
   const total = completed.reduce((n, v) => n + v.centimes, 0)
   const metrics = [
     [
@@ -416,17 +499,70 @@ function Stats({ a, s }: PageProps) {
         eur(completed.length ? total / completed.length : 0),
       ],
       ['Annulations', visits.filter((v) => v.statut === 'annulé').length],
+      [
+        'Nouvelles clientes reçues',
+        [...distinctClients].filter((id) => !returning.has(id)).length,
+      ],
+      [
+        'Clientes déjà venues',
+        [...distinctClients].filter((id) => returning.has(id)).length,
+      ],
+      [
+        'Taux d’annulation',
+        visits.length
+          ? Math.round(
+              (100 * visits.filter((v) => v.statut === 'annulé').length) /
+                visits.length,
+            ) + ' %'
+          : '—',
+      ],
+      [
+        'Occupation du planning',
+        capacity?.ouvrables
+          ? Math.round((100 * capacity.occupees) / capacity.ouvrables) + ' %'
+          : '—',
+      ],
       ['Absences', visits.filter((v) => v.statut === 'absent').length],
     )
   return (
     <>
       <Heading title="Tableau de bord">
-        <input
-          aria-label="Mois"
-          type="month"
-          value={month}
-          onChange={(e) => setMonth(e.target.value)}
-        />
+        <label>
+          Du
+          <input
+            type="date"
+            value={from}
+            max={to}
+            onChange={(e) => {
+              if (e.target.value) setFrom(e.target.value)
+            }}
+          />
+        </label>
+        <label>
+          Au
+          <input
+            type="date"
+            value={to}
+            min={from}
+            onChange={(e) => {
+              if (e.target.value) setTo(e.target.value)
+            }}
+          />
+        </label>
+        {premium && (
+          <select
+            aria-label="Prestation"
+            value={service}
+            onChange={(e) => setService(e.target.value)}
+          >
+            <option value="">Toutes les prestations</option>
+            {s.services.map((v) => (
+              <option key={v.id} value={v.id}>
+                {v.nom}
+              </option>
+            ))}
+          </select>
+        )}
         {a.offre === 'Premium' && (
           <select
             aria-label="Professionnelle"
@@ -442,6 +578,13 @@ function Stats({ a, s }: PageProps) {
           </select>
         )}
       </Heading>
+      {error && <p role="alert">{error}</p>}
+      {premium && (
+        <small>
+          L’occupation tient compte des horaires et des indisponibilités
+          actuels, toutes prestations confondues.
+        </small>
+      )}
       <div className="tiles">
         {metrics.map(([label, value]) => (
           <article className="tile" key={label}>

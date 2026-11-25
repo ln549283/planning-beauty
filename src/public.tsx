@@ -13,15 +13,24 @@ import {
   type Member,
 } from './data'
 import { Brand, Empty, Form } from './ui'
+import { BuyGift, PayButton } from './payments'
 type Slot = { personne: string; nom: string; debut: string }
 export function PublicBooking({ id }: { id: string }) {
   const [catalog, setCatalog] = useState<{
       nom: string
       couleur: string
-      soins: Service[]
+      soins: (Service & { avance: number })[]
+      vente_bons: boolean
       equipe: Member[]
     } | null>(),
     [sid, setSid] = useState(''),
+    [extras, setExtras] = useState<string[]>([]),
+    [policy, setPolicy] = useState<{
+      mode: string
+      valeur: number
+      disponible: boolean
+    }>(),
+    [operation, setOperation] = useState(() => crypto.randomUUID()),
     [day, setDay] = useState(today()),
     [slots, setSlots] = useState<Slot[]>([]),
     [selected, setSelected] = useState<Slot>(),
@@ -30,23 +39,52 @@ export function PublicBooking({ id }: { id: string }) {
     [loading, setLoading] = useState(false),
     [revision, refresh] = useState(0)
   useEffect(() => {
-    rpc<typeof catalog>('catalogue_public', { i: id })
-      .then((c) => {
+    Promise.all([
+      rpc<typeof catalog>('catalogue_public', { i: id }),
+      rpc<typeof policy>('politique_publique', { i: id }),
+    ])
+      .then(([c, p]) => {
+        setPolicy(p)
         setCatalog(c)
         setSid(c?.soins[0]?.id || '')
       })
       .catch((e) => setErr(message(e)))
   }, [id])
+  const selection = [sid, ...extras]
+  const soins = selection
+    .map((id) => catalog?.soins.find((s) => s.id === id))
+    .filter((s) => !!s)
+  const price = soins.reduce((sum, s) => sum + s.centimes, 0),
+    duration = soins.reduce((sum, s) => sum + s.minutes, 0)
+  const deposit =
+    policy?.mode === 'fixe'
+      ? Math.min(price, policy.valeur)
+      : policy?.mode === 'pourcentage'
+        ? Math.round((price * policy.valeur) / 100)
+        : policy?.mode === 'intégral'
+          ? price
+          : 0
+  useEffect(() => {
+    setOperation(crypto.randomUUID())
+  }, [selected])
   useEffect(() => {
     let live = true
     setSelected(undefined)
     setSlots([])
     if (!sid || !day) return
     setLoading(true)
-    setErr('')
-    rpc<Slot[]>('creneaux', { i: id, sid, jour: day })
+    rpc<Slot[]>('creneaux_selection', {
+      i: id,
+      ids: [sid, ...extras],
+      jour: day,
+    })
       .then((s) => {
-        if (live) setSlots(s)
+        if (live) {
+          setSlots(s)
+          setWho((previous) =>
+            s.some((slot) => slot.personne === previous) ? previous : '',
+          )
+        }
       })
       .catch((e) => {
         if (live) setErr(message(e))
@@ -57,7 +95,7 @@ export function PublicBooking({ id }: { id: string }) {
     return () => {
       live = false
     }
-  }, [day, sid, id, revision])
+  }, [day, sid, extras, id, revision])
   return (
     <main
       className="onboard"
@@ -74,7 +112,14 @@ export function PublicBooking({ id }: { id: string }) {
           <>
             <label>
               Prestation
-              <select value={sid} onChange={(e) => setSid(e.target.value)}>
+              <select
+                value={sid}
+                onChange={(e) => {
+                  setErr('')
+                  setExtras([])
+                  setSid(e.target.value)
+                }}
+              >
                 {catalog.soins.map((s) => (
                   <option key={s.id} value={s.id}>
                     {s.nom} · {s.minutes} min · {eur(s.centimes)}
@@ -82,13 +127,50 @@ export function PublicBooking({ id }: { id: string }) {
                 ))}
               </select>
             </label>
+            {catalog.soins.length > 1 && (
+              <details>
+                <summary>Ajouter des soins à la suite</summary>
+                {catalog.soins
+                  .filter((s) => s.id !== sid)
+                  .map((s) => (
+                    <label className="check" key={s.id}>
+                      <input
+                        type="checkbox"
+                        checked={extras.includes(s.id)}
+                        onChange={(e) =>
+                          setExtras(
+                            e.target.checked
+                              ? [...extras, s.id]
+                              : extras.filter((id) => id !== s.id),
+                          )
+                        }
+                      />
+                      {s.nom} · {s.minutes} min · {eur(s.centimes)}
+                    </label>
+                  ))}
+              </details>
+            )}
+            {extras.length > 0 && (
+              <p>
+                {duration} min de soins · {eur(price)}
+              </p>
+            )}
+            {policy?.disponible === false && (
+              <p role="alert">
+                Le paiement en ligne est temporairement indisponible. Contactez
+                votre institut pour réserver.
+              </p>
+            )}
             <label>
               Date à La Réunion
               <input
                 type="date"
                 min={today()}
                 value={day}
-                onChange={(e) => setDay(e.target.value)}
+                onChange={(e) => {
+                  setErr('')
+                  setDay(e.target.value)
+                }}
               />
             </label>
             {catalog.equipe?.length > 1 && (
@@ -153,28 +235,42 @@ export function PublicBooking({ id }: { id: string }) {
                   alt={selected.nom}
                 />
               )}
-            {selected && (
+            {selected && policy?.disponible && (
               <Form
-                label="Confirmer ma réservation"
+                label={
+                  deposit
+                    ? 'Réserver et passer au paiement'
+                    : 'Confirmer ma réservation'
+                }
                 submit={async (f) => {
                   try {
-                    const token = await rpc<string>('reserver', {
+                    const token = await rpc<string>('reserver_selection', {
                       i: id,
                       p: selected.personne,
-                      sid,
+                      ids: selection,
+                      prix: price,
+                      duree: duration,
+                      operation,
                       d: selected.debut,
                       n: field(f, 'nom'),
                       email: field(f, 'email'),
-                      web: true,
                     })
                     location.assign(link('rdv', token))
                   } catch (e) {
-                    refresh((v) => v + 1)
+                    if (message(e).includes('indisponible'))
+                      refresh((v) => v + 1)
                     setErr(message(e))
                     throw e
                   }
                 }}
               >
+                {deposit > 0 && (
+                  <p>
+                    À régler maintenant · {eur(deposit)}. Ouvrez Stripe dans les
+                    4 minutes suivant la réservation pour bénéficier des 35
+                    minutes de paiement.
+                  </p>
+                )}
                 <label>
                   Prénom et nom
                   <input
@@ -200,11 +296,14 @@ export function PublicBooking({ id }: { id: string }) {
           !err && 'Chargement…'
         )}
       </article>
+      {catalog?.vente_bons && <BuyGift id={id} />}
     </main>
   )
 }
 export function ManageBooking({ token }: { token: string }) {
   const [visit, setVisit] = useState<{
+      avance: number
+      echeance: string
       libelle: string
       statut: string
       debut: string
@@ -214,10 +313,19 @@ export function ManageBooking({ token }: { token: string }) {
     [err, setErr] = useState('')
   async function get(annuler = false) {
     setVisit(await rpc('mon_rdv', { t: token, annuler }))
+    setErr('')
   }
   useEffect(() => {
     get().catch((e) => setErr(message(e)))
   }, [token])
+  useEffect(() => {
+    if (visit?.statut !== 'en paiement') return
+    const timer = setInterval(() => {
+      if (document.visibilityState === 'visible')
+        get().catch((e) => setErr(message(e)))
+    }, 5000)
+    return () => clearInterval(timer)
+  }, [token, visit?.statut])
   return (
     <main className="onboard">
       <Brand />
@@ -236,6 +344,18 @@ export function ManageBooking({ token }: { token: string }) {
               Conservez le lien privé de cette page pour retrouver votre
               réservation.
             </p>
+            {visit.statut === 'en paiement' && (
+              <>
+                <p>
+                  Le créneau sera confirmé à réception du paiement. En cas
+                  d’annulation après paiement, le montant est disponible en
+                  avoir. En cas d’absence sans prévenir, il est conservé par
+                  l’institut.
+                </p>
+                <PayButton id={token} amount={visit.avance} />
+                <Form label="Libérer le créneau" submit={() => get(true)} />
+              </>
+            )}
             {visit.statut === 'confirmé' && (
               <Form
                 label="Déplacer mon rendez-vous"
@@ -252,6 +372,12 @@ export function ManageBooking({ token }: { token: string }) {
                   <input type="datetime-local" name="date" required />
                 </label>
               </Form>
+            )}
+            {visit.statut === 'expiré' && (
+              <p>
+                Le délai de paiement est écoulé. Vous pouvez réserver un nouveau
+                créneau auprès de l’institut.
+              </p>
             )}
             {visit.statut === 'confirmé' && (
               <Form

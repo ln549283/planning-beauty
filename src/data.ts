@@ -1,15 +1,20 @@
 import { createClient } from '@supabase/supabase-js'
-export const db = createClient(
+export const apiUrl =
   import.meta.env.VITE_SUPABASE_URL ||
-    'https://eeuvauqtqhtxnrzvggzt.supabase.co',
+  'https://eeuvauqtqhtxnrzvggzt.supabase.co'
+export const publicKey =
   import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY ||
-    'sb_publishable_8XnvCnxQmFAO7a6CSwEIDg_YQBcoJsq',
-)
+  'sb_publishable_8XnvCnxQmFAO7a6CSwEIDg_YQBcoJsq'
+export const db = createClient(apiUrl, publicKey, {
+  auth: { flowType: 'pkce' },
+})
 export type Institute = {
   id: string
   nom: string
   offre: 'Solo' | 'Premium'
   couleur: string
+  fidelite_seuil: number
+  fidelite_cadeau: string
   marge: number
   delai_minutes: number
   horizon_jours: number
@@ -47,10 +52,19 @@ export type Visit = {
   centimes: number
   debut: string
   fin: string
+  derogation?: string
+  echeance?: string
   statut: string
   origine: string
 }
-export type Client = { id: string; nom: string; email: string | null }
+export type Client = {
+  id: string
+  nom: string
+  email: string | null
+  telephone: string
+  preferences: string
+  notes: string
+}
 export type Block = {
   id: string
   personnes: string[]

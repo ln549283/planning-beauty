@@ -2,15 +2,18 @@ import { useState } from 'react'
 import { Eye, EyeOff } from 'lucide-react'
 
 const passwordHint =
-  '8 caractères minimum, avec au moins une majuscule, un chiffre et un symbole.'
+  '8 caractères minimum, avec au moins une majuscule, une minuscule, un chiffre et un symbole.'
 
 export function newPassword(data: FormData) {
   const password = String(data.get('password') ?? '')
   if (
     Array.from(password).length < 8 ||
-    !/\p{Lu}/u.test(password) ||
+    !/[A-Z]/.test(password) ||
+    !/[a-z]/.test(password) ||
     !/[0-9]/.test(password) ||
-    !/[\p{P}\p{S}]/u.test(password)
+    !Array.from(password).some((c) =>
+      '!@#$%^&*()_+-=[]{};\'\\:"|<>?,./`~'.includes(c),
+    )
   ) {
     throw new Error(passwordHint)
   }

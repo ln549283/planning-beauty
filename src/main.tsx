@@ -2,8 +2,18 @@ import { lazy, Suspense, useEffect, useState } from 'react'
 import { createRoot } from 'react-dom/client'
 import type { Session } from '@supabase/supabase-js'
 import { Check, ChevronLeft } from 'lucide-react'
-import { db, field, message, rows, rpc, type Institute } from './data'
+import {
+  apiUrl,
+  publicKey,
+  db,
+  field,
+  message,
+  rows,
+  rpc,
+  type Institute,
+} from './data'
 import { Brand, Form } from './ui'
+import { VerifiedAccount } from './VerifiedAccount'
 import {
   callbackMessage,
   newPassword,
@@ -19,6 +29,7 @@ import '@fontsource/dm-sans/latin-600.css'
 import '@fontsource/instrument-serif/latin-400.css'
 import '@fontsource/instrument-serif/latin-400-italic.css'
 import './style.css'
+import { GiftOrderPage } from './payments'
 
 const params = new URLSearchParams(location.search)
 const initialAuthError = callbackMessage()
@@ -31,6 +42,18 @@ function Auth() {
     [authError, setAuthError] = useState(initialAuthError),
     [notice, setNotice] = useState(''),
     [plan, setPlan] = useState('Premium')
+  const [googleEnabled, setGoogleEnabled] = useState(false)
+  useEffect(() => {
+    const controller = new AbortController()
+    fetch(new URL('/auth/v1/settings', apiUrl), {
+      headers: { apikey: publicKey },
+      signal: controller.signal,
+    })
+      .then((res) => (res.ok ? res.json() : null))
+      .then((settings) => setGoogleEnabled(settings?.external?.google === true))
+      .catch(() => {})
+    return () => controller.abort()
+  }, [])
   function change(m: typeof mode) {
     setMode(m)
     setNotice('')
@@ -89,7 +112,7 @@ function Auth() {
               : mode === 'signup'
                 ? 'Choisissez votre offre et configurez votre institut.'
                 : mode === 'resend'
-                  ? 'Recevez un nouveau lien de confirmation par e-mail.'
+                  ? 'Recevez un lien sécurisé pour vérifier votre adresse et choisir un nouveau mot de passe.'
                   : 'Recevez un lien de réinitialisation par e-mail.'}
           </p>
           {accountMode && (
@@ -113,7 +136,7 @@ function Auth() {
               {authError}
             </p>
           )}
-          {accountMode && (
+          {accountMode && googleEnabled && (
             <button
               type="button"
               className="oauth"
@@ -135,24 +158,14 @@ function Auth() {
             submit={async (f) => {
               const email = field(f, 'email'),
                 password = String(f.get('password') || '')
-              if (mode === 'resend') {
-                const { error } = await db.auth.resend({
-                  type: 'signup',
-                  email,
-                  options: { emailRedirectTo: redirectAfterAuth() },
-                })
-                if (error) throw error
-                setNotice(
-                  'Si cette adresse attend une confirmation, un nouveau lien vous a été envoyé. Utilisez le dernier e-mail reçu.',
-                )
-                return
-              }
-              if (mode === 'forgot') {
+              if (mode === 'resend' || mode === 'forgot') {
                 const { error } = await db.auth.resetPasswordForEmail(email, {
                   redirectTo: redirectAfterAuth(),
                 })
                 if (error) throw error
-                setNotice('Consultez votre messagerie pour poursuivre.')
+                setNotice(
+                  'Ouvrez le dernier lien reçu dans ce navigateur et choisissez un nouveau mot de passe pour accéder à votre institut.',
+                )
                 return
               }
               if (mode === 'signup') {
@@ -177,7 +190,7 @@ function Auth() {
                 if (!data.session) {
                   change('resend')
                   setNotice(
-                    'Confirmez votre adresse avec le lien reçu par e-mail.',
+                    'Ouvrez le lien de confirmation reçu par e-mail dans ce navigateur.',
                   )
                 }
                 return
@@ -309,7 +322,11 @@ function Home({ session }: { session: Session }) {
     const list = await rows<Institute>('instituts')
     setInstitutes(list.sort((a, b) => a.nom.localeCompare(b.nom)))
     setId((prev) =>
-      list.some((a) => a.id === prev) ? prev : list[0]?.id || '',
+      list.some((a) => a.id === prev)
+        ? prev
+        : list.find((a) => a.id === params.get('marchand'))?.id ||
+          list[0]?.id ||
+          '',
     )
   }
   useEffect(() => {
@@ -439,9 +456,11 @@ function App() {
     const { data } = db.auth.onAuthStateChange((event, s) => {
       setSession(s)
       if (event === 'PASSWORD_RECOVERY') setReset(true)
+      if (!s) setReset(false)
     })
     return () => data.subscription.unsubscribe()
   }, [])
+  if (params.has('bon')) return <GiftOrderPage id={params.get('bon')!} />
   if (params.has('reservation'))
     return <PublicBooking id={params.get('reservation')!} />
   if (params.has('rdv')) return <ManageBooking token={params.get('rdv')!} />
@@ -470,7 +489,13 @@ function App() {
         <Brand />
       </div>
     )
-  return session ? <Home session={session} /> : <Auth />
+  return session ? (
+    <VerifiedAccount key={session.user.id} session={session}>
+      <Home session={session} />
+    </VerifiedAccount>
+  ) : (
+    <Auth />
+  )
 }
 createRoot(document.getElementById('root')!).render(
   <Suspense

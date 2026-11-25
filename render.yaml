@@ -5,3 +5,13 @@ services:
     branch: main
     buildCommand: npm ci --include=dev && npm run build
     staticPublishPath: ./dist
+    headers:
+      - path: /*
+        name: Referrer-Policy
+        value: no-referrer
+      - path: /*
+        name: X-Content-Type-Options
+        value: nosniff
+      - path: /*
+        name: X-Frame-Options
+        value: DENY

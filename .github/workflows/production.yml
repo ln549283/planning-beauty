@@ -1,0 +1,40 @@
+name: Installer le backend de production
+on: workflow_dispatch
+permissions:
+  contents: read
+concurrency:
+  group: planning-beauty-production
+  cancel-in-progress: false
+jobs:
+  installation:
+    environment: production
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      SUPABASE_PROJECT_REF: eeuvauqtqhtxnrzvggzt
+      APP_URL: https://planning-beauty-a3zp.onrender.com/
+      SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+      - run: npm run deploy:database
+      - uses: supabase/setup-cli@v1
+        with:
+          version: latest
+      - name: Configurer l’adresse de retour et déployer les fonctions
+        run: |
+          supabase secrets set "APP_URL=$APP_URL" --project-ref "$SUPABASE_PROJECT_REF"
+          for function in calendrier rappels paiement stripe-evenements; do
+            supabase functions deploy "$function" --project-ref "$SUPABASE_PROJECT_REF" --use-api
+          done
+      - name: Activer les rappels si l’expéditeur est configuré
+        env:
+          BREVO_SENDER_EMAIL: ${{ secrets.BREVO_SENDER_EMAIL }}
+          BREVO_API_KEY: ${{ secrets.BREVO_API_KEY }}
+          RAPPELS_SECRET: ${{ secrets.RAPPELS_SECRET }}
+        run: |
+          if [[ -n "$BREVO_SENDER_EMAIL$BREVO_API_KEY$RAPPELS_SECRET" ]]; then
+            node scripts/deployer.mjs --rappels
+          fi

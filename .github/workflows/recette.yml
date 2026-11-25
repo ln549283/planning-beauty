@@ -1,0 +1,25 @@
+name: Recette de livraison
+on: [push, pull_request, workflow_dispatch]
+permissions:
+  contents: read
+jobs:
+  recette:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+      - run: npm ci --include=dev
+      - run: npm run build
+      - run: npm --prefix tests ci
+      - run: npm --prefix tests test
+      - run: bash tests/integration/run.sh
+        env:
+          CHROME_BIN: /usr/bin/google-chrome
+      - uses: denoland/setup-deno@v2
+        with:
+          deno-version: v2.x
+      - run: deno check --node-modules-dir=none supabase/functions/{paiement,stripe-evenements,calendrier,rappels}/index.ts
+      - run: deno test --allow-env --node-modules-dir=none tests/integration/stripe.ts

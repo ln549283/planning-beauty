@@ -33,6 +33,7 @@ export function Agenda({ a, s, user, reload }: PageProps) {
     [view, setView] = useState(innerWidth < 720 ? 'Jour' : 'Semaine'),
     [who, setWho] = useState(user),
     [bookMember, setBookMember] = useState(user),
+    [force, setForce] = useState(false),
     [modal, setModal] = useState(''),
     [picked, setPicked] = useState(''),
     [v, setV] = useState<Visit>()
@@ -50,7 +51,12 @@ export function Agenda({ a, s, user, reload }: PageProps) {
   const visits = s.visits.filter(
     (v) =>
       (who === 'all' || v.personne === who) &&
-      v.statut !== 'annulé' &&
+      !['annulé', 'expiré'].includes(v.statut) &&
+      !(
+        v.statut === 'en paiement' &&
+        v.echeance &&
+        Date.parse(v.echeance) <= Date.now()
+      ) &&
       days.includes(v.debut.slice(0, 10)),
   )
   const blocks = s.blocks.filter(
@@ -77,6 +83,7 @@ export function Agenda({ a, s, user, reload }: PageProps) {
       60,
   )
   function booking(d = day, t = '09:00', p = who === 'all' ? user : who) {
+    setForce(false)
     setBookMember(p)
     setPicked(d + 'T' + t)
     setModal('visit')
@@ -330,18 +337,43 @@ export function Agenda({ a, s, user, reload }: PageProps) {
             <Form
               label="Réserver"
               submit={async (f) => {
-                await rpc('reserver', {
+                if (
+                  force &&
+                  !confirm(
+                    'Créer ce rendez-vous même si la professionnelle est occupée ou hors horaires ?',
+                  )
+                )
+                  return
+                await rpc(force ? 'reserver_exception' : 'reserver', {
                   i: a.id,
                   p: bookMember,
                   sid: field(f, 'soin'),
                   d: field(f, 'date'),
                   n: field(f, 'nom'),
                   email: field(f, 'email'),
-                  web: false,
+                  ...(force ? { motif: field(f, 'motif') } : { web: false }),
                 })
                 await done()
               }}
             >
+              {me?.role === 'gerante' && (
+                <>
+                  <label className="check">
+                    <input
+                      type="checkbox"
+                      checked={force}
+                      onChange={(e) => setForce(e.target.checked)}
+                    />
+                    Autoriser exceptionnellement un conflit de planning
+                  </label>
+                  {force && (
+                    <label>
+                      Motif de la dérogation
+                      <input name="motif" required maxLength={200} />
+                    </label>
+                  )}
+                </>
+              )}
               {manager && s.members.length > 1 && (
                 <label>
                   Professionnelle
@@ -531,6 +563,7 @@ function VisitDetail({ s, v, user, reload }: PageProps & { v: Visit }) {
         {eur(v.centimes)}
       </p>
       <strong className="pill">{v.statut}</strong>
+      {v.derogation && <p>Dérogation accordée · {v.derogation}</p>}
       <p>{v.preparation}</p>
       {courriers.length > 0 && (
         <details>
@@ -544,7 +577,10 @@ function VisitDetail({ s, v, user, reload }: PageProps & { v: Visit }) {
       )}
       {v.statut === 'confirmé' && (
         <div className="actions wrap">
-          {['Modifier', 'Terminer', 'Absence', 'Annuler'].map((x) => (
+          {(Date.parse(v.debut + '+04:00') > Date.now()
+            ? ['Modifier', 'Annuler']
+            : ['Modifier', 'Terminer', 'Absence', 'Annuler']
+          ).map((x) => (
             <button key={x} onClick={() => setAction(x)}>
               {x}
             </button>
