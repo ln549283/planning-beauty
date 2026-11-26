@@ -7,7 +7,7 @@ const base = 'http://127.0.0.1:59999',
   mailbox = 'http://127.0.0.1:58025'
 const redirect = 'http://127.0.0.1:58000/'
 const email = 'julie-' + randomBytes(8).toString('hex') + '@example.test'
-const password = 'Test!2' + randomBytes(12).toString('hex')
+const password = 'Test\\2' + randomBytes(12).toString('hex')
 const pg = new Client({
   host: '127.0.0.1',
   port: 55442,
@@ -107,7 +107,7 @@ try {
   const challenge = pkce()
   const weak = await call('/signup', {
     email,
-    password: 'weakpass',
+    password: 'TestWithoutSymbol42',
     ...challenge.params,
   })
   assert.equal(

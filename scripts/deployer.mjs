@@ -96,9 +96,7 @@ async function api(method, path, body) {
     const failure = await result.json().catch(() => null)
     const message = typeof failure?.message === 'string' ? failure.message : ''
     if (path === '/database/query' && !process.argv.includes('--rappels')) {
-      const sql = message.match(
-        /\b[0-9A-Z]{5}: [^\r\n]{1,300}/,
-      )
+      const sql = message.match(/\b[0-9A-Z]{5}: [^\r\n]{1,300}/)
       if (sql) throw Error(prefix + ' · ' + sql[0].split('CONTEXT:')[0])
     }
     const fields = Object.keys(body || {}).filter(
@@ -196,8 +194,10 @@ else if (process.argv.includes('--rappels')) {
     mailer_autoconfirm: false,
     external_email_enabled: true,
     password_min_length: Math.max(8, current.password_min_length || 0),
+    // UpdateAuthConfigBody requires its exact enum value: a literal backslash
+    // followed by an escape for the colon inside the symbol group.
     password_required_characters:
-      'abcdefghijklmnopqrstuvwxyz:ABCDEFGHIJKLMNOPQRSTUVWXYZ:0123456789:!@#$%^&*()_+-=[]{};\'\\:"|<>?,./`~',
+      'abcdefghijklmnopqrstuvwxyz:ABCDEFGHIJKLMNOPQRSTUVWXYZ:0123456789:!@#$%^&*()_+-=[]{};\'\\\\:"|<>?,./`~',
     mailer_secure_email_change_enabled: true,
     security_update_password_require_reauthentication: true,
   }

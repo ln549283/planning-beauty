@@ -3,7 +3,7 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "test": "node database.mjs"
+    "test": "node --test deployment.mjs && node database.mjs"
   },
   "dependencies": {
     "embedded-postgres": "17.12.0-beta.19",
