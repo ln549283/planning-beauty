@@ -1,6 +1,6 @@
 import { createHash } from 'node:crypto'
+import http from 'node:http'
 import { readFileSync, readdirSync } from 'node:fs'
-import { spawnSync } from 'node:child_process'
 
 const directory = new URL('../supabase/migrations/', import.meta.url)
 const versions = readdirSync(directory)
@@ -46,48 +46,97 @@ function migrationSQL() {
     .concat("notify pgrst,'reload schema';", 'commit;')
     .join('\n')
 }
-const token = process.env.SUPABASE_ACCESS_TOKEN
+// Honor the runner's HTTPS proxy when supported by Node.
+http.setGlobalProxyFromEnv?.()
+const token = process.env.SUPABASE_ACCESS_TOKEN?.trim()
 const ref = process.env.SUPABASE_PROJECT_REF || 'eeuvauqtqhtxnrzvggzt'
 const site =
   new URL(process.env.APP_URL || 'https://planning-beauty-a3zp.onrender.com/')
     .origin + '/'
+
 async function api(method, path, body) {
-  if (!token || !/^[a-z0-9_-]+$/i.test(token) || !/^\w+$/.test(ref))
+  if (!token)
     throw Error(
-      'Renseignez SUPABASE_ACCESS_TOKEN dans les secrets de déploiement.',
+      'Secret SUPABASE_ACCESS_TOKEN absent. Ajoutez-le dans GitHub Actions, environnement production.',
     )
-  const args = [
-    '--silent',
-    '--show-error',
-    '--fail',
-    '--max-time',
-    '150',
-    '--config',
-    '-',
-    '--request',
+  if (/^(sb_secret_|sb_publishable_|github_pat_|gh[pousr]_)/.test(token))
+    throw Error(
+      'SUPABASE_ACCESS_TOKEN doit contenir un Personal Access Token créé dans le compte Supabase.',
+    )
+  if (!/^[a-z0-9]+$/.test(ref))
+    throw Error('Référence de projet Supabase invalide.')
+  const url = 'https://api.supabase.com/v1/projects/' + ref + path
+  const result = await fetch(url, {
     method,
-    'https://api.supabase.com/v1/projects/' + ref + path,
-  ]
-  const config = [
-    'header = "Authorization: Bearer ' + token + '"',
-    'header = "Content-Type: application/json"',
-  ]
-  if (body) config.push('data-binary = ' + JSON.stringify(JSON.stringify(body)))
-  const result = spawnSync('curl', args, {
-    input: config.join('\n') + '\n',
-    encoding: 'utf8',
-    maxBuffer: 4 * 1024 * 1024,
+    redirect: 'error',
+    signal: AbortSignal.timeout(150000),
+    headers: {
+      Authorization: 'Bearer ' + token,
+      'Content-Type': 'application/json',
+    },
+    body: body === undefined ? undefined : JSON.stringify(body),
   })
-  if (result.status !== 0)
-    throw Error(
-      'Échec de la requête ' +
-        method +
-        ' ' +
-        path +
-        ' · ' +
-        (result.stderr || result.error?.message || ''),
+  if (!result.ok) {
+    const prefix = method + ' ' + path + ' · HTTP ' + result.status
+    if (result.status === 401)
+      throw Error(
+        prefix + ' · Vérifiez que le jeton personnel Supabase est valide.',
+      )
+    if (result.status === 403)
+      throw Error(
+        prefix +
+          ' · Vérifiez les droits du compte Supabase sur le projet ' +
+          ref +
+          '.',
+      )
+    if (result.status === 404)
+      throw Error(prefix + ' · Vérifiez la référence du projet et son accès.')
+    // Auth responses and reminders can contain private settings. Only report known
+    // field names or PostgreSQL diagnostics for the non-secret schema migration.
+    const failure = await result.json().catch(() => null)
+    const message = typeof failure?.message === 'string' ? failure.message : ''
+    if (path === '/database/query' && !process.argv.includes('--rappels')) {
+      const sql = message.match(
+        /\b[0-9A-Z]{5}: [^\r\n]{1,300}/,
+      )
+      if (sql) throw Error(prefix + ' · ' + sql[0].split('CONTEXT:')[0])
+    }
+    const fields = Object.keys(body || {}).filter(
+      (key) => path === '/config/auth' && JSON.stringify(failure).includes(key),
     )
-  return result.stdout.trim() ? JSON.parse(result.stdout) : null
+    throw Error(
+      prefix +
+        (fields.length
+          ? ' · Réglage refusé : ' + fields.join(', ')
+          : ' · Requête refusée par Supabase.'),
+    )
+  }
+  const data = await result.text()
+  return data.trim() ? JSON.parse(data) : null
+}
+function matchesSetting(key, expected, actual) {
+  if (key === 'uri_allow_list') {
+    const urls = (value) =>
+      [
+        ...new Set(
+          String(value || '')
+            .split(',')
+            .map((x) => x.trim())
+            .filter(Boolean),
+        ),
+      ]
+        .sort()
+        .join(',')
+    return urls(expected) === urls(actual)
+  }
+  if (key === 'site_url') {
+    try {
+      return new URL(expected).href === new URL(actual).href
+    } catch {
+      return false
+    }
+  }
+  return actual === expected
 }
 if (process.argv.includes('--sql')) console.log(migrationSQL())
 else if (process.argv.includes('--rappels')) {
@@ -129,6 +178,7 @@ else if (process.argv.includes('--rappels')) {
   if (!jobs[0]?.active) throw Error('Programmation des rappels non vérifiée')
   console.log('Tâche de rappel active, chaque minute.')
 } else {
+  console.log('Vérification de la configuration Auth du projet ' + ref)
   const current = await api('GET', '/config/auth')
   const redirects = [
     ...new Set([
@@ -151,11 +201,19 @@ else if (process.argv.includes('--rappels')) {
     mailer_secure_email_change_enabled: true,
     security_update_password_require_reauthentication: true,
   }
-  await api('PATCH', '/config/auth', changes)
+  const modified = Object.fromEntries(
+    Object.entries(changes).filter(
+      ([key, value]) => !matchesSetting(key, value, current[key]),
+    ),
+  )
+  if (Object.keys(modified).length) await api('PATCH', '/config/auth', modified)
   const receipt = await api('GET', '/config/auth')
   for (const [key, value] of Object.entries(changes))
-    if (receipt[key] !== value)
+    if (!matchesSetting(key, value, receipt[key]))
       throw Error('Configuration non vérifiée · ' + key)
+  console.log(
+    'Configuration Auth vérifiée. Installation du schéma en transaction.',
+  )
   await api('POST', '/database/query', { query: migrationSQL() })
   const checks = await api('POST', '/database/query', {
     query: 'select version from beauty_private.livraisons order by version;',
