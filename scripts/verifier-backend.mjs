@@ -32,7 +32,7 @@ if (env.RENDER === 'true' || process.argv.includes('--check')) {
     method: 'POST',
     body: '{}',
   })
-  if (typeof installed !== 'string' || installed < '202611250007')
+  if (typeof installed !== 'string' || installed < '202611260001')
     throw Error('Installez les migrations du backend avant de publier le site.')
   console.log(
     'Supabase répond, la confirmation est obligatoire et le schéma de réservation est disponible.',

@@ -31,6 +31,7 @@ import '@fontsource/instrument-serif/latin-400-italic.css'
 import './style.css'
 import { GiftOrderPage } from './payments'
 
+const DemoApp = lazy(() => import('./demo/DemoApp'))
 const params = new URLSearchParams(location.search)
 const initialAuthError = callbackMessage()
 function Auth() {
@@ -115,6 +116,7 @@ function Auth() {
                   ? 'Recevez un lien sécurisé pour vérifier votre adresse et choisir un nouveau mot de passe.'
                   : 'Recevez un lien de réinitialisation par e-mail.'}
           </p>
+          {mode === 'login' && <a href="/?demo=1">Découvrir l’institut démo</a>}
           {accountMode && (
             <nav className="tabs">
               <button
@@ -413,6 +415,7 @@ function Home({ session }: { session: Session }) {
               </>
             )}
           </Form>
+          {!invite && <a href="/?demo=1">Découvrir l’institut démo</a>}
           {creating && (
             <button className="text-link" onClick={() => setCreating(false)}>
               Retour
@@ -441,6 +444,16 @@ function Home({ session }: { session: Session }) {
     <Workspace
       key={id}
       user={session.user.id}
+      defaults={{
+        prenom:
+          session.user.user_metadata.prenom ??
+          session.user.user_metadata.given_name ??
+          '',
+        nom:
+          session.user.user_metadata.nom ??
+          session.user.user_metadata.family_name ??
+          '',
+      }}
       institute={institute}
       institutes={institutes!}
       change={setId}
@@ -505,7 +518,7 @@ createRoot(document.getElementById('root')!).render(
       </main>
     }
   >
-    <App />
+    {params.get('demo') === '1' ? <DemoApp /> : <App />}
   </Suspense>,
 )
 

@@ -30,6 +30,7 @@ import {
   dayAdd,
   dayName,
   db,
+  isDemo,
   eur,
   hour,
   isoDay,
@@ -45,6 +46,7 @@ import {
 import { Brand, Empty, Heading } from './ui'
 import { Notes, Materiel, LoyaltySettings, Loyalty } from './quotidien'
 import { PaymentSettings } from './payments'
+import { Profile } from './Profile'
 const nav = [
   ['Agenda', CalendarDays],
   ['Préparer ma journée', ClipboardList],
@@ -55,6 +57,7 @@ const nav = [
   ['Équipe', Users],
   ['Liste d’attente', ClipboardList],
   ['Paramètres', Gear],
+  ['Mon profil', ContactRound],
 ] as const
 export function Workspace({
   user,
@@ -63,9 +66,11 @@ export function Workspace({
   change,
   create,
   refreshInstitute,
+  defaults,
 }: {
   user: string
   institute: Institute
+  defaults: { prenom: string; nom: string }
   institutes: Institute[]
   change: (id: string) => void
   create: () => void
@@ -124,23 +129,25 @@ export function Workspace({
       </button>
       <aside className={'side ' + (menu ? 'shown' : '')}>
         <Brand />
-        <label className="switcher">
-          Institut
-          <select
-            aria-label="Changer d’institut"
-            value={a.id}
-            onChange={(e) =>
-              e.target.value === 'new' ? create() : change(e.target.value)
-            }
-          >
-            {institutes.map((i) => (
-              <option value={i.id} key={i.id}>
-                {i.nom}
-              </option>
-            ))}
-            <option value="new">+ Créer un institut</option>
-          </select>
-        </label>
+        {!isDemo && (
+          <label className="switcher">
+            Institut
+            <select
+              aria-label="Changer d’institut"
+              value={a.id}
+              onChange={(e) =>
+                e.target.value === 'new' ? create() : change(e.target.value)
+              }
+            >
+              {institutes.map((i) => (
+                <option value={i.id} key={i.id}>
+                  {i.nom}
+                </option>
+              ))}
+              <option value="new">+ Créer un institut</option>
+            </select>
+          </label>
+        )}
         <nav>
           {items.map(([k, Icon]) => (
             <button
@@ -156,15 +163,40 @@ export function Workspace({
         <div className="account">
           <b>{me?.nom}</b>
           <small>{a.offre} · La Réunion</small>
-          <button onClick={() => db.auth.signOut()}>
-            <LogOut size={16} /> Déconnexion
-          </button>
+          {isDemo ? (
+            <>
+              <button
+                onClick={() => {
+                  if (
+                    confirm(
+                      'Réinitialiser toutes les données de cette démonstration ?',
+                    )
+                  )
+                    location.reload()
+                }}
+              >
+                Réinitialiser la démo
+              </button>
+              <a href="/">Quitter la démo</a>
+            </>
+          ) : (
+            <>
+              <a href="/?demo=1">Ouvrir l’institut démo</a>
+              <button onClick={() => db.auth.signOut()}>
+                <LogOut size={16} /> Déconnexion
+              </button>
+            </>
+          )}
         </div>
       </aside>
       <main className="work">
         <div className="context">
           <span>{a.nom}</span>
-          <span>{a.offre} · 0 €</span>
+          <span>
+            {isDemo
+              ? 'Données fictives · session temporaire'
+              : a.offre + ' · 0 €'}
+          </span>
         </div>
         {err && (
           <p className="error">
@@ -176,12 +208,13 @@ export function Workspace({
         )}
         {props && s ? (
           <>
+            {page === 'Mon profil' && <Profile defaults={defaults} />}
             {page === 'Agenda' && <Agenda {...props} />}
             {page === 'Prestations' && <Services {...props} />}
             {page === 'Équipe' && (
               <>
                 <Team {...props} />
-                <CalendarFeed a={a} />
+                {!isDemo && <CalendarFeed a={a} />}
                 {me?.role === 'responsable' && <Exceptions {...props} />}
               </>
             )}
@@ -201,14 +234,16 @@ export function Workspace({
                 {a.offre === 'Premium' && (
                   <LoyaltySettings a={a} refresh={refreshInstitute} />
                 )}
-                <PaymentSettings id={a.id} premium={a.offre === 'Premium'} />
+                {!isDemo && (
+                  <PaymentSettings id={a.id} premium={a.offre === 'Premium'} />
+                )}
                 <Offer a={a} refreshInstitute={refreshInstitute} />
               </>
             )}
             {page === 'Préparer ma journée' && <Prepare {...props} />}
             {page === 'Clientes' && <Clients {...props} />}
             {page === 'Tableau de bord' && owner && <Stats {...props} />}
-            {page === 'Agenda' && owner && !a.ouvert && (
+            {page === 'Agenda' && !isDemo && owner && !a.ouvert && (
               <section className="setup">
                 <BookOpen />
                 <div>

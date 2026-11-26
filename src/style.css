@@ -754,3 +754,13 @@ span {
 }
 .oauth { width:100%; font-weight:600; margin-top:.25rem; }
 .password { margin-top:.48rem; }
+
+dialog:has(.bulk-line) { width: min(48rem, 94vw); }
+.bulk-line { display: grid; grid-template-columns: minmax(8rem, 2fr) 1fr 1fr auto; align-items: end; gap: .65rem; padding: .65rem 0; border-bottom: 1px solid var(--line); }
+.bulk-line input { min-width: 0; width: 100%; }
+.bulk-line .error { grid-column: 1/-1; }
+@media (max-width: 600px) {
+  .bulk-line { grid-template-columns: repeat(2,minmax(0,1fr)); padding: 1rem 0; }
+  .bulk-line label:first-child { grid-column: 1/-1; }
+}
+.account a { color: #f3e0aa; padding: .5rem .8rem; text-underline-offset: .2em; }

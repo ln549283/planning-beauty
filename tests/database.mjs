@@ -529,6 +529,81 @@ grant usage on schema auth to authenticated,anon; grant usage on schema public t
     fn(u.c, 'remettre_cadeau', customer, crypto.randomUUID()),
     /indisponible/,
   )
+  // Private account information is independent of membership and public booking.
+  const profileArgs = [
+    'Julie',
+    'Lagon',
+    'Non précisé',
+    null,
+    '',
+    '',
+    '',
+    '',
+    '',
+  ]
+  await fn(u.c, 'enregistrer_profil', ...profileArgs)
+  assert.equal((await fn(u.c, 'mon_profil')).nom, 'Lagon')
+  assert.equal(await fn(other.c, 'mon_profil'), null)
+  await assert.rejects(fn(anon, 'mon_profil'))
+  await assert.rejects(fn(ancien.c, 'enregistrer_profil', ...profileArgs))
+  await assert.rejects(
+    fn(
+      u.c,
+      'enregistrer_profil',
+      'Julie',
+      'Lagon',
+      'Femme',
+      '2150-01-01',
+      '',
+      '',
+      '',
+      '',
+      '',
+    ),
+    /futur/,
+  )
+  const batchId = crypto.randomUUID()
+  const newRows = [
+    { nom: 'Import A', minutes: 15, centimes: 1050 },
+    { nom: 'Import B', minutes: 20, centimes: 1600 },
+  ]
+  const submit = (conn, op, list) =>
+    fn(conn, 'importer_soins', i, op, JSON.stringify(list), false)
+  await assert.rejects(submit(other.c, batchId, newRows))
+  await assert.rejects(
+    submit(u.c, batchId, [newRows[0], { ...newRows[1], minutes: 0 }]),
+    /Ligne 2/,
+  )
+  assert.equal(
+    (await u.c.query("select id from public.soins where nom='Import A'"))
+      .rowCount,
+    0,
+  )
+  assert.equal(await submit(u.c, batchId, newRows), 2)
+  assert.equal(await submit(u.c, batchId, newRows), 2)
+  await assert.rejects(submit(u.c, crypto.randomUUID(), newRows), /existe déjà/)
+  assert.equal(
+    (await u.c.query("select en_ligne from public.soins where nom='Import A'"))
+      .rows[0].en_ligne,
+    false,
+  )
+  await assert.rejects(fn(m.c, 'transferer_gerance', i, u.id))
+  await assert.rejects(fn(u.c, 'transferer_gerance', i, other.id))
+  await fn(u.c, 'transferer_gerance', i, m.id)
+  assert.equal(
+    (
+      await m.c.query(
+        "select personne from public.equipe where institut_id=$1 and role='gerante'",
+        [i],
+      )
+    ).rows[0].personne,
+    m.id,
+  )
+  await assert.rejects(submit(u.c, crypto.randomUUID(), newRows))
+  assert.equal(await fn(m.c, 'mon_profil'), null)
+  console.log(
+    'OK · profil privé, lot atomique et rejouable, gérance transférée et anciens droits retirés.',
+  )
   console.log(
     'OK · avances, expiration, paiement répété, bon en ligne, encaissement fractionné, vérification du rôle, fidélité et préparation.',
   )

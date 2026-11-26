@@ -15,6 +15,9 @@ jobs:
       - run: npm run build
       - run: npm --prefix tests ci
       - run: npm --prefix tests test
+      - run: node tests/integration/demo.mjs
+        env:
+          CHROME_BIN: /usr/bin/google-chrome
       - run: bash tests/integration/run.sh
         env:
           CHROME_BIN: /usr/bin/google-chrome

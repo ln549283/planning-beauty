@@ -1,0 +1,12 @@
+create role anon;
+create role authenticated;
+create role service_role;
+create schema auth;
+create table auth.users(id uuid primary key,email text,email_confirmed_at timestamptz default now(),encrypted_password text);
+create table auth.sessions(id uuid primary key,user_id uuid,created_at timestamptz default now());
+create table auth.identities(user_id uuid,provider text,identity_data jsonb);
+create function auth.uid() returns uuid language sql stable as $$ select '00000000-0000-4000-8000-000000000001'::uuid $$;
+create function auth.jwt() returns jsonb language sql stable as $$ select '{"email":"julie@example.test","session_id":"00000000-0000-4000-8000-000000000099","amr":[{"method":"email/signup"}]}'::jsonb $$;
+grant usage on schema auth to authenticated, anon;
+insert into auth.users(id,email) values(auth.uid(),'julie@example.test'),('00000000-0000-4000-8000-000000000002','ines@example.test'),('00000000-0000-4000-8000-000000000003','lea@example.test');
+insert into auth.sessions(id,user_id) values('00000000-0000-4000-8000-000000000099',auth.uid());

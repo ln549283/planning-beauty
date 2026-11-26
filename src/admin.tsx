@@ -1,17 +1,22 @@
 import { useState } from 'react'
 import { Plus, Flower2, Clock3, Gift, Scissors } from 'lucide-react'
-import { eur, field, link, rpc, type Service } from './data'
+import { eur, field, link, rpc, isDemo, type Service } from './data'
 import { Dialog, Empty, Form, Heading } from './ui'
 import type { PageProps } from './agenda'
+import { BulkServices } from './BulkServices'
 export function Services({ a, s, user, reload }: PageProps) {
   const [edit, setEdit] = useState<Service | null | undefined>(),
-    [kind, setKind] = useState(false)
+    [kind, setKind] = useState(false),
+    [bulk, setBulk] = useState(false)
   const can = s.members.find((m) => m.personne === user)?.role === 'gerante'
   return (
     <>
       <Heading title="Prestations">
         {can && (
           <>
+            <button onClick={() => setBulk(true)}>
+              Ajouter plusieurs prestations
+            </button>
             <button
               onClick={() => {
                 setKind(true)
@@ -32,31 +37,46 @@ export function Services({ a, s, user, reload }: PageProps) {
           </>
         )}
       </Heading>
-      <div className="tiles">
-        {s.services.map((x) => (
-          <article className="tile" key={x.id}>
-            <Flower2 />
-            <small>
-              {x.elements.length ? 'Formule' : 'Prestation'} ·{' '}
-              {x.actif ? 'Active' : 'Archivée'}
-            </small>
-            <h2>{x.nom}</h2>
-            <p>
-              {x.minutes} min · {eur(x.centimes)}
-            </p>
-            {can && (
-              <button
-                onClick={() => {
-                  setKind(x.elements.length > 0)
-                  setEdit(x)
-                }}
-              >
-                Modifier
-              </button>
-            )}
-          </article>
+      {Array.from(new Set(s.services.map((x) => x.categorie || '')))
+        .sort()
+        .map((category) => (
+          <section key={category}>
+            {category && <h2>{category}</h2>}
+            <div className="tiles">
+              {s.services
+                .filter((x) => (x.categorie || '') === category)
+                .sort((a, b) => a.nom.localeCompare(b.nom, 'fr'))
+                .map((x) => (
+                  <article className="tile" key={x.id}>
+                    <Flower2 />
+                    <small>
+                      {x.elements.length || x.composition_libre
+                        ? 'Formule'
+                        : 'Prestation'}{' '}
+                      · {x.actif ? 'Active' : 'Archivée'}
+                    </small>
+                    <h2>{x.nom}</h2>
+                    <p>
+                      {x.minutes} min · {eur(x.centimes)}
+                    </p>
+                    {can && (
+                      <button
+                        onClick={() => {
+                          setKind(
+                            x.elements.length > 0 ||
+                              Boolean(x.composition_libre),
+                          )
+                          setEdit(x)
+                        }}
+                      >
+                        Modifier
+                      </button>
+                    )}
+                  </article>
+                ))}
+            </div>
+          </section>
         ))}
-      </div>
       {!s.services.length && (
         <Empty>
           <Scissors />
@@ -65,6 +85,17 @@ export function Services({ a, s, user, reload }: PageProps) {
             Ajoutez votre première prestation pour la proposer dans l’agenda.
           </p>
         </Empty>
+      )}
+      {bulk && (
+        <BulkServices
+          i={a.id}
+          services={s.services}
+          close={() => setBulk(false)}
+          finish={async () => {
+            await reload()
+            setBulk(false)
+          }}
+        />
       )}
       {edit !== undefined && (
         <Dialog
@@ -94,6 +125,7 @@ function ServiceForm({
   finish,
 }: PageProps & { edit: Service | null; kind: boolean; finish: () => void }) {
   const [parts, setParts] = useState(edit?.elements || []),
+    [fixed, setFixed] = useState(Boolean(edit?.composition_libre)),
     [duration, setDuration] = useState(String(edit?.minutes || '')),
     [price, setPrice] = useState(edit ? String(edit.centimes / 100) : '')
   function sum(ids: string[]) {
@@ -104,15 +136,17 @@ function ServiceForm({
   return (
     <Form
       submit={async (f) => {
-        if (kind && !parts.length)
+        if (kind && !fixed && !parts.length)
           throw Error('Sélectionnez les prestations de la formule.')
-        await rpc('enregistrer_soin', {
+        await rpc('enregistrer_fiche_soin', {
+          categorie: field(f, 'categorie'),
+          composition_libre: kind && fixed ? field(f, 'composition') : '',
           i: a.id,
           sid: edit?.id || null,
           n: field(f, 'nom'),
           duree: Number(duration),
           prix: Math.round(Number(price) * 100),
-          composants: parts,
+          composants: fixed ? [] : parts,
           habilitees: f.getAll('people'),
           prep: field(f, 'prep'),
           visible: f.has('online'),
@@ -126,11 +160,44 @@ function ServiceForm({
         Nom
         <input name="nom" required defaultValue={edit?.nom} maxLength={120} />
       </label>
+      <label>
+        Catégorie
+        <input
+          name="categorie"
+          defaultValue={edit?.categorie || ''}
+          maxLength={80}
+        />
+      </label>
       {kind && (
+        <label>
+          Composition de la formule
+          <select
+            value={fixed ? 'libre' : 'catalogue'}
+            onChange={(e) => setFixed(e.target.value === 'libre')}
+          >
+            <option value="catalogue">Prestations du catalogue</option>
+            <option value="libre">Zones incluses, durée et tarif fixes</option>
+          </select>
+        </label>
+      )}
+      {kind && fixed && (
+        <label>
+          Zones incluses
+          <input
+            name="composition"
+            defaultValue={edit?.composition_libre}
+            maxLength={500}
+            required
+          />
+        </label>
+      )}
+      {kind && !fixed && (
         <fieldset>
           <legend>Prestations incluses</legend>
           {s.services
-            .filter((x) => !x.elements.length && x.actif)
+            .filter(
+              (x) => !x.elements.length && !x.composition_libre && x.actif,
+            )
             .map((x) => (
               <label className="check" key={x.id}>
                 <input
@@ -231,7 +298,9 @@ export function Settings({
   refreshInstitute: () => Promise<void>
 }) {
   const [hours, setHours] = useState(a.horaires),
-    [saved, setSaved] = useState(false)
+    [saved, setSaved] = useState(false),
+    [delay, setDelay] = useState(String(a.delai_minutes)),
+    [horizon, setHorizon] = useState(String(a.horizon_jours))
   const dayNames = [
     'Lundi',
     'Mardi',
@@ -350,33 +419,51 @@ export function Settings({
           <h2>Réservation cliente</h2>
           <div className="pair">
             <label>
-              Préavis minimum (min)
+              Délai minimum avant le rendez-vous (min)
               <input
                 type="number"
                 name="delai"
-                defaultValue={a.delai_minutes}
+                value={delay}
+                onChange={(e) => setDelay(e.target.value)}
                 min="0"
                 max="43200"
                 required
               />
             </label>
             <label>
-              Réservation à l’avance (jours)
+              Jusqu’à combien de jours peut-on réserver ?
               <input
                 type="number"
                 name="horizon"
-                defaultValue={a.horizon_jours}
+                value={horizon}
+                onChange={(e) => setHorizon(e.target.value)}
                 min="1"
                 max="730"
                 required
               />
             </label>
           </div>
+          {delay !== '' && horizon !== '' && (
+            <p>
+              Vos clientes peuvent réserver entre{' '}
+              {Number(delay) > 0 && Number(delay) % 60 === 0
+                ? Number(delay) / 60 +
+                  ' heure' +
+                  (Number(delay) > 60 ? 's' : '')
+                : delay + ' min'}{' '}
+              et {horizon} jour{Number(horizon) > 1 ? 's' : ''} à l’avance.
+            </p>
+          )}
           <label className="check">
-            <input type="checkbox" name="online" defaultChecked={a.ouvert} />
+            <input
+              type="checkbox"
+              disabled={isDemo}
+              name="online"
+              defaultChecked={a.ouvert}
+            />
             Ouvrir les réservations en ligne
           </label>
-          {a.ouvert && (
+          {!isDemo && a.ouvert && (
             <a
               href={link('reservation', a.id)}
               target="_blank"
@@ -412,9 +499,9 @@ export function Team({ a, s, user, reload }: PageProps) {
               {!m.actif && 'Accès désactivé · '}
               {
                 {
-                  gerante: 'Gérante',
+                  gerante: 'Gérant(e)',
                   employee: 'Employée',
-                  responsable: 'Responsable',
+                  responsable: 'Responsable des plannings',
                 }[m.role]
               }
             </p>
@@ -467,7 +554,45 @@ export function Team({ a, s, user, reload }: PageProps) {
           </label>
         </Form>
       </section>
-      {can && (
+      {can && s.members.some((m) => m.actif && m.personne !== user) && (
+        <section className="paper">
+          <h2>Transférer la gérance</h2>
+          <Form
+            label="Transférer la gérance"
+            submit={async (f) => {
+              const id = field(f, 'destinataire'),
+                nom = s.members.find((m) => m.personne === id)?.nom
+              if (
+                !confirm(
+                  'Transférer la gérance de ' +
+                    a.nom +
+                    ' à ' +
+                    nom +
+                    ' ? Vous deviendrez responsable des plannings et perdrez l’accès aux finances.',
+                )
+              )
+                return
+              await rpc('transferer_gerance', { i: a.id, destinataire: id })
+              await reload()
+            }}
+          >
+            <label>
+              Nouveau gérant ou nouvelle gérante
+              <select required name="destinataire" defaultValue="">
+                <option value="">Choisir un membre actif</option>
+                {s.members
+                  .filter((m) => m.actif && m.personne !== user)
+                  .map((m) => (
+                    <option key={m.personne} value={m.personne}>
+                      {m.nom}
+                    </option>
+                  ))}
+              </select>
+            </label>
+          </Form>
+        </section>
+      )}
+      {can && !isDemo && (
         <section className="paper">
           <h2>Inviter une collègue</h2>
           {a.offre === 'Premium' ? (
@@ -495,7 +620,7 @@ export function Team({ a, s, user, reload }: PageProps) {
                 <select name="role">
                   <option value="employee">Employée · son agenda</option>
                   <option value="responsable">
-                    Responsable · tous les agendas
+                    Responsable des plannings · tous les agendas
                   </option>
                 </select>
               </label>
@@ -697,12 +822,12 @@ export function Exceptions({ a, s, reload }: PageProps) {
           <input type="date" name="date" required />
         </label>
         <label>
-          Planning
+          À qui s’applique ce changement ?
           <select name="who">
-            <option value="">Institut</option>
+            <option value="">Tout l’institut</option>
             {s.members.map((m) => (
               <option key={m.personne} value={m.personne}>
-                {m.nom}
+                {m.nom} uniquement
               </option>
             ))}
           </select>
@@ -918,7 +1043,7 @@ function ColleagueEditor({
           Rôle
           <select name="role" defaultValue={m.role}>
             <option value="employee">Employée</option>
-            <option value="responsable">Responsable</option>
+            <option value="responsable">Responsable des plannings</option>
           </select>
         </label>
         <fieldset>

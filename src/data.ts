@@ -5,8 +5,19 @@ export const apiUrl =
 export const publicKey =
   import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY ||
   'sb_publishable_8XnvCnxQmFAO7a6CSwEIDg_YQBcoJsq'
+export const isDemo = new URLSearchParams(location.search).get('demo') === '1'
 export const db = createClient(apiUrl, publicKey, {
-  auth: { flowType: 'pkce' },
+  auth: {
+    flowType: 'pkce',
+    ...(isDemo
+      ? {
+          storageKey: 'planning-demo-isolated',
+          autoRefreshToken: false,
+          persistSession: false,
+          detectSessionInUrl: false,
+        }
+      : {}),
+  },
 })
 export type Institute = {
   id: string
@@ -30,6 +41,8 @@ export type Member = {
   horaires: Record<string, string[]>
 }
 export type Service = {
+  composition_libre: string
+  categorie: string
   id: string
   nom: string
   minutes: number
@@ -110,11 +123,13 @@ export async function rpc<T = unknown>(
   name: string,
   params: Record<string, unknown>,
 ) {
+  if (isDemo) return (await import('./demo/database')).demoRpc<T>(name, params)
   const { data, error } = await db.rpc(name, params)
   if (error) throw new Error(error.message)
   return data as T
 }
 export async function rows<T>(table: string, i?: string): Promise<T[]> {
+  if (isDemo) return (await import('./demo/database')).demoRows<T>(table, i)
   const all: T[] = []
   const size = 250
   for (let offset = 0; ; offset += size) {
