@@ -22,12 +22,12 @@ jobs:
       - run: npm run deploy:database
       - uses: supabase/setup-cli@v1
         with:
-          version: latest
+          version: 3.4.0
       - name: Configurer l’adresse de retour et déployer les fonctions
         run: |
-          supabase secrets set "APP_URL=$APP_URL" --project-ref "$SUPABASE_PROJECT_REF"
+          supabase secrets set "APP_URL=$APP_URL" --remote="$SUPABASE_PROJECT_REF" --yes
           for function in calendrier rappels paiement stripe-evenements; do
-            supabase functions deploy "$function" --project-ref "$SUPABASE_PROJECT_REF" --use-api
+            supabase functions deploy "$function" --remote="$SUPABASE_PROJECT_REF" --use-api --yes
           done
       - name: Activer les rappels si l’expéditeur est configuré
         env:
