@@ -53,25 +53,25 @@ try {
     })
   await button('Prestations').click()
   assert.equal(await page.locator('article.tile').count(), 20)
-  await heading('Épilations au fil').waitFor()
-  await heading('Épilations à la cire classique').waitFor()
+  await heading('Épilations › Fil').waitFor()
+  await heading('Épilations › Cire classique').waitFor()
   assert.equal(
-    await heading('Épilations au fil')
+    await heading('Épilations › Fil')
       .locator('..')
       .locator('article.tile')
       .count(),
     5,
   )
   assert.equal(
-    await heading('Épilations à la cire classique')
+    await heading('Épilations › Cire classique')
       .locator('..')
       .locator('article.tile')
       .count(),
     15,
   )
-  const bundle = heading(
-    'Aisselles + Demi-jambes + Maillot intégral · Cire classique',
-  ).locator('..')
+  const bundle = heading('Aisselles + Demi-jambes + Maillot intégral').locator(
+    '..',
+  )
   assert.match(await bundle.innerText(), /45 min · 55,00/)
   assert.equal(
     await page
@@ -105,6 +105,58 @@ try {
   await button('Créer 2 prestations').click()
   await heading('Soin test A').waitFor()
   assert.equal(await page.locator('article.tile').count(), 22)
+  await button('Agenda').click()
+  await button('Année').click()
+  await page.locator('.year-grid button').first().click()
+  await page.locator('.month-grid button').first().click()
+  await page.getByRole('button', { name: 'Aujourd’hui' }).click()
+  await page.locator('.event.visit').first().click()
+  await button('Reprendre rendez-vous').click()
+  assert(await page.getByLabel('Nom et prénom de la cliente').inputValue())
+  const nextMonth = new Date()
+  nextMonth.setUTCMonth(nextMonth.getUTCMonth() + 1, 1)
+  await page
+    .getByLabel('Mois et année')
+    .fill(nextMonth.toISOString().slice(0, 7))
+  await page
+    .getByLabel('Horaires disponibles')
+    .locator('option')
+    .nth(1)
+    .waitFor({ state: 'attached', timeout: 10000 })
+    .catch(async (e) => {
+      throw Error(
+        (await page.locator('dialog').innerText()) + ' ' + errors + ' ' + e,
+      )
+    })
+  await page.getByLabel('Horaires disponibles').selectOption({ index: 1 })
+  await button('Réserver').click()
+  await page.getByRole('dialog').waitFor({ state: 'hidden' })
+  await page.getByRole('link', { name: 'Page de réservation cliente' }).click()
+  await heading('Réserver un soin').waitFor()
+  const service = page.getByLabel('Prestation', { exact: true })
+  const brow = service
+    .locator('option')
+    .filter({ hasText: /^Sourcils — Épilations › Fil/ })
+  await service.selectOption(
+    await brow.getAttribute('value', { timeout: 5000 }).catch(async (e) => {
+      throw Error(
+        (await page.locator('main').innerText()) + ' ' + errors + ' ' + e,
+      )
+    }),
+  )
+  await page.getByLabel(/Passer à la formule/).check()
+  await page.getByText(/15 min de soins · 18,00/).waitFor()
+  await page.getByRole('link', { name: 'Agenda de démonstration' }).click()
+  await button('Clientes').click()
+  await page.setViewportSize({ width: 1024, height: 768 })
+  await page.locator('.client-list .listrow').first().click()
+  const listBounds = await page.locator('.client-list').boundingBox()
+  const detailBounds = await page.locator('.client-detail').boundingBox()
+  assert(listBounds.x + listBounds.width <= detailBounds.x + 1)
+  await button('Prendre rendez-vous').click()
+  assert(await page.getByLabel('Nom et prénom de la cliente').inputValue())
+  await button('Fermer').click()
+  await page.setViewportSize({ width: 1280, height: 850 })
   await button('Mon profil').click()
   await page.getByLabel('Ville', { exact: true }).fill('Saint-Paul')
   await button('Enregistrer').click()
@@ -124,6 +176,13 @@ try {
       'Vos clientes peuvent réserver entre 1 heure et 180 jours à l’avance.',
     )
     .waitFor()
+  await page.getByLabel('Mercredi · horaire 2').fill('11:45')
+  await page
+    .locator('.hours-row')
+    .filter({ has: page.getByText('Jeudi', { exact: true }) })
+    .getByRole('button', { name: /Copier mercredi/ })
+    .click()
+  assert.equal(await page.getByLabel('Jeudi · horaire 2').inputValue(), '11:45')
   await page.getByLabel('Délai minimum avant le rendez-vous (min)').fill('30')
   await page
     .getByText(
@@ -171,7 +230,7 @@ try {
   assert.deepEqual(external, [])
   assert.deepEqual(errors, [])
   console.log(
-    'OK · démo de production isolée, 20 soins, deux catégories, import tableur, profil, réglages, préparation et réinitialisation.',
+    'OK · démo de production isolée, catalogue, import, agenda mensuel et annuel, reprise au comptoir, formule suggérée, fiche tablette, horaires et réinitialisation.',
   )
 } finally {
   await browser?.close()

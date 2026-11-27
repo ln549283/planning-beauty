@@ -764,3 +764,107 @@ dialog:has(.bulk-line) { width: min(48rem, 94vw); }
   .bulk-line label:first-child { grid-column: 1/-1; }
 }
 .account a { color: #f3e0aa; padding: .5rem .8rem; text-underline-offset: .2em; }
+
+.month-grid,
+.year-grid {
+  display: grid;
+  gap: 0.35rem;
+  padding: 0.8rem;
+  grid-template-columns: repeat(7, minmax(0, 1fr));
+}
+.month-grid > small {
+  text-align: center;
+}
+.month-grid button {
+  min-width: 0;
+  min-height: 2.65rem;
+  text-align: center;
+  padding: 0.35rem;
+  position: relative;
+}
+.month-grid button small {
+  display: block;
+}
+.month-grid .current {
+  border-color: var(--accent);
+}
+.month-grid [aria-pressed='true'],
+.listrow[aria-pressed='true'] {
+  background: #e2ede5;
+}
+.availability-dot {
+  display: block;
+  margin: 0.1rem auto;
+  width: 0.45rem;
+  height: 0.45rem;
+  border-radius: 50%;
+  background: var(--accent);
+}
+.year-grid {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+.period-button {
+  font-weight: 600;
+}
+.booking-dates > summary {
+  cursor: pointer;
+}
+.suggestion-edit {
+  padding: 0.5rem 0;
+  border-bottom: 1px solid var(--line);
+}
+.client-prompt,
+.back-clients {
+  display: none;
+}
+@media (min-width: 740px) {
+  .clients-layout {
+    display: grid;
+    grid-template-columns: minmax(205px, 1fr) minmax(0, 1.65fr);
+    gap: 1rem;
+    align-items: start;
+  }
+  .client-list {
+    max-height: 78vh;
+    overflow: auto;
+  }
+  .client-detail {
+    margin: 0;
+    width: 100%;
+  }
+  .client-prompt {
+    display: block;
+  }
+}
+@media (max-width: 739px) {
+  .client-selected .client-list {
+    display: none;
+  }
+  .back-clients {
+    display: inline-flex;
+  }
+}
+.visit b,
+.visit span,
+.visit small {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.visit.compact-visit {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.2rem;
+}
+.compact-visit b,
+.compact-visit span {
+  min-width: 0;
+  flex: 1;
+}
+.compact-visit small {
+  display: none;
+}
+.demo-back {
+  display: inline-block;
+  margin: 1rem;
+}

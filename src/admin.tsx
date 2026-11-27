@@ -1,6 +1,15 @@
 import { useState } from 'react'
 import { Plus, Flower2, Clock3, Gift, Scissors } from 'lucide-react'
-import { eur, field, link, rpc, isDemo, type Service } from './data'
+import {
+  eur,
+  field,
+  link,
+  rpc,
+  isDemo,
+  categoryPath,
+  serviceLabel,
+  type Service,
+} from './data'
 import { Dialog, Empty, Form, Heading } from './ui'
 import type { PageProps } from './agenda'
 import { BulkServices } from './BulkServices'
@@ -8,12 +17,18 @@ export function Services({ a, s, user, reload }: PageProps) {
   const [edit, setEdit] = useState<Service | null | undefined>(),
     [kind, setKind] = useState(false),
     [bulk, setBulk] = useState(false)
+  const [colorsOpen, setColorsOpen] = useState(false)
   const can = s.members.find((m) => m.personne === user)?.role === 'gerante'
   return (
     <>
       <Heading title="Prestations">
         {can && (
           <>
+            {s.colors.length > 0 && (
+              <button onClick={() => setColorsOpen(true)}>
+                Couleurs des catégories
+              </button>
+            )}
             <button onClick={() => setBulk(true)}>
               Ajouter plusieurs prestations
             </button>
@@ -37,14 +52,14 @@ export function Services({ a, s, user, reload }: PageProps) {
           </>
         )}
       </Heading>
-      {Array.from(new Set(s.services.map((x) => x.categorie || '')))
+      {Array.from(new Set(s.services.map(categoryPath)))
         .sort()
         .map((category) => (
           <section key={category}>
             {category && <h2>{category}</h2>}
             <div className="tiles">
               {s.services
-                .filter((x) => (x.categorie || '') === category)
+                .filter((x) => categoryPath(x) === category)
                 .sort((a, b) => a.nom.localeCompare(b.nom, 'fr'))
                 .map((x) => (
                   <article className="tile" key={x.id}>
@@ -85,6 +100,36 @@ export function Services({ a, s, user, reload }: PageProps) {
             Ajoutez votre première prestation pour la proposer dans l’agenda.
           </p>
         </Empty>
+      )}
+      {colorsOpen && (
+        <Dialog
+          title="Couleurs des catégories"
+          close={() => setColorsOpen(false)}
+        >
+          {[...s.colors]
+            .sort((a, b) =>
+              categoryPath(a).localeCompare(categoryPath(b), 'fr'),
+            )
+            .map((c) => (
+              <Form
+                key={c.id}
+                label="Appliquer"
+                submit={async (f) => {
+                  await rpc('colorer_categorie', {
+                    i: a.id,
+                    ref: c.id,
+                    couleur: field(f, 'couleur'),
+                  })
+                  await reload()
+                }}
+              >
+                <label>
+                  {categoryPath(c)}
+                  <input type="color" name="couleur" defaultValue={c.couleur} />
+                </label>
+              </Form>
+            ))}
+        </Dialog>
       )}
       {bulk && (
         <BulkServices
@@ -128,6 +173,9 @@ function ServiceForm({
     [fixed, setFixed] = useState(Boolean(edit?.composition_libre)),
     [duration, setDuration] = useState(String(edit?.minutes || '')),
     [price, setPrice] = useState(edit ? String(edit.centimes / 100) : '')
+  const [category, setCategory] = useState(edit?.categorie || '')
+  const [suggestions, setSuggestions] = useState(edit?.suggestions || [])
+  const [replacements, setReplacements] = useState(edit?.remplacements || [])
   function sum(ids: string[]) {
     const items = s.services.filter((x) => ids.includes(x.id))
     setDuration(String(items.reduce((n, x) => n + x.minutes, 0)))
@@ -138,7 +186,10 @@ function ServiceForm({
       submit={async (f) => {
         if (kind && !fixed && !parts.length)
           throw Error('Sélectionnez les prestations de la formule.')
-        await rpc('enregistrer_fiche_soin', {
+        await rpc('configurer_soin', {
+          sous_categorie: field(f, 'sous_categorie'),
+          suggestions,
+          remplacements: replacements.filter((id) => suggestions.includes(id)),
           categorie: field(f, 'categorie'),
           composition_libre: kind && fixed ? field(f, 'composition') : '',
           i: a.id,
@@ -164,10 +215,38 @@ function ServiceForm({
         Catégorie
         <input
           name="categorie"
-          defaultValue={edit?.categorie || ''}
+          list="service-categories"
+          value={category}
+          onChange={(e) => setCategory(e.target.value)}
           maxLength={80}
         />
       </label>
+      <datalist id="service-categories">
+        {[...new Set(s.colors.map((c) => c.categorie))].map((c) => (
+          <option key={c} value={c} />
+        ))}
+      </datalist>
+      {category.trim() && (
+        <label>
+          Sous-catégorie
+          <input
+            key={category}
+            name="sous_categorie"
+            list="service-subcategories"
+            maxLength={80}
+            defaultValue={
+              category === edit?.categorie ? edit.sous_categorie : ''
+            }
+          />
+        </label>
+      )}
+      <datalist id="service-subcategories">
+        {s.colors
+          .filter((c) => c.categorie === category && c.sous_categorie)
+          .map((c) => (
+            <option key={c.id} value={c.sous_categorie} />
+          ))}
+      </datalist>
       {kind && (
         <label>
           Composition de la formule
@@ -211,7 +290,7 @@ function ServiceForm({
                     sum(ids)
                   }}
                 />
-                {x.nom}
+                {serviceLabel(x)}
               </label>
             ))}
           <button type="button" onClick={() => sum(parts)}>
@@ -269,6 +348,82 @@ function ServiceForm({
           ))}
         </fieldset>
       )}
+      <fieldset>
+        <legend>Prestations complémentaires</legend>
+        <small>Proposez jusqu’à trois soins dans l’ordre souhaité.</small>
+        {suggestions.map((id, index) => {
+          const target = s.services.find((x) => x.id === id)
+          if (!target) return null
+          return (
+            <div key={id} className="suggestion-edit">
+              <strong>{serviceLabel(target)}</strong>
+              {(target.elements.length > 0 || target.composition_libre) && (
+                <label className="check">
+                  <input
+                    type="checkbox"
+                    checked={replacements.includes(id)}
+                    onChange={(e) =>
+                      setReplacements(
+                        e.target.checked
+                          ? [...replacements, id]
+                          : replacements.filter((x) => x !== id),
+                      )
+                    }
+                  />
+                  Remplacer le soin initial par cette formule
+                </label>
+              )}
+              <div className="actions">
+                {index > 0 && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      const next = [...suggestions]
+                      next.splice(index, 1)
+                      next.splice(index - 1, 0, id)
+                      setSuggestions(next)
+                    }}
+                  >
+                    Monter
+                  </button>
+                )}
+                <button
+                  type="button"
+                  onClick={() =>
+                    setSuggestions(suggestions.filter((x) => x !== id))
+                  }
+                >
+                  Retirer
+                </button>
+              </div>
+            </div>
+          )
+        })}
+        {suggestions.length < 3 && (
+          <label>
+            Ajouter une suggestion
+            <select
+              value=""
+              onChange={(e) => setSuggestions([...suggestions, e.target.value])}
+            >
+              <option value="">Choisir un soin</option>
+              {s.services
+                .filter(
+                  (x) =>
+                    x.id !== edit?.id &&
+                    x.actif &&
+                    x.en_ligne &&
+                    !suggestions.includes(x.id),
+                )
+                .map((x) => (
+                  <option key={x.id} value={x.id}>
+                    {serviceLabel(x)}
+                  </option>
+                ))}
+            </select>
+          </label>
+        )}
+      </fieldset>
       <label className="check">
         <input
           type="checkbox"
@@ -288,6 +443,47 @@ function ServiceForm({
     </Form>
   )
 }
+const dayNames = [
+  'Lundi',
+  'Mardi',
+  'Mercredi',
+  'Jeudi',
+  'Vendredi',
+  'Samedi',
+  'Dimanche',
+]
+function CopyHours({
+  day,
+  lastDay,
+  hours,
+  copy,
+}: {
+  day: string
+  lastDay: string
+  hours: Record<string, string[]>
+  copy: (intervals: string[]) => void
+}) {
+  const source =
+    lastDay !== day && hours[lastDay]?.length
+      ? lastDay
+      : Object.keys(hours)
+          .filter((key) => Number(key) < Number(day) && hours[key]?.length)
+          .sort((a, b) => Number(b) - Number(a))[0]
+  if (!source) return null
+  const intervals = hours[source]
+  const ranges = intervals
+    .filter((_, i) => i % 2 === 0)
+    .map((t, i) => t + '–' + intervals[2 * i + 1])
+  return (
+    <button
+      type="button"
+      className="text-link"
+      onClick={() => copy([...intervals])}
+    >
+      Copier {dayNames[Number(source) - 1].toLowerCase()} · {ranges.join(' / ')}
+    </button>
+  )
+}
 export function Settings({
   a,
   reload,
@@ -297,19 +493,12 @@ export function Settings({
   reload: () => Promise<void>
   refreshInstitute: () => Promise<void>
 }) {
+  const [lastDay, setLastDay] = useState('')
   const [hours, setHours] = useState(a.horaires),
     [saved, setSaved] = useState(false),
     [delay, setDelay] = useState(String(a.delai_minutes)),
     [horizon, setHorizon] = useState(String(a.horizon_jours))
-  const dayNames = [
-    'Lundi',
-    'Mardi',
-    'Mercredi',
-    'Jeudi',
-    'Vendredi',
-    'Samedi',
-    'Dimanche',
-  ]
+
   return (
     <>
       <Heading title="Paramètres" />
@@ -373,6 +562,15 @@ export function Settings({
                   />
                   {n}
                 </label>
+                <CopyHours
+                  day={key}
+                  lastDay={lastDay}
+                  hours={hours}
+                  copy={(intervals) => {
+                    setHours({ ...hours, [key]: intervals })
+                    setLastDay(key)
+                  }}
+                />
                 {h && (
                   <>
                     <div className="times">
@@ -383,14 +581,15 @@ export function Settings({
                           type="time"
                           required
                           value={t}
-                          onChange={(e) =>
+                          onChange={(e) => {
+                            setLastDay(key)
                             setHours({
                               ...hours,
                               [key]: h.map((v, k) =>
                                 k === j ? e.target.value : v,
                               ),
                             })
-                          }
+                          }}
                         />
                       ))}
                     </div>
@@ -944,7 +1143,7 @@ export function Waitlist({ a, s, reload }: PageProps) {
                   .filter((x) => x.actif)
                   .map((x) => (
                     <option key={x.id} value={x.id}>
-                      {x.nom}
+                      {serviceLabel(x)}
                     </option>
                   ))}
               </select>
@@ -1023,6 +1222,7 @@ function ColleagueEditor({
   close,
 }: PageProps & { id: string; close: () => void }) {
   const m = s.members.find((m) => m.personne === id)!
+  const [lastDay, setLastDay] = useState('')
   const [hours, setHours] = useState(m.horaires)
   return (
     <Dialog title={m.nom} close={close}>
@@ -1069,6 +1269,15 @@ function ColleagueEditor({
                   />
                   {day}
                 </label>
+                <CopyHours
+                  day={k}
+                  lastDay={lastDay}
+                  hours={hours}
+                  copy={(intervals) => {
+                    setHours({ ...hours, [k]: intervals })
+                    setLastDay(k)
+                  }}
+                />
                 {h && (
                   <div className="times">
                     {h.map((v, j) => (
@@ -1078,14 +1287,15 @@ function ColleagueEditor({
                         type="time"
                         value={v}
                         required
-                        onChange={(e) =>
+                        onChange={(e) => {
+                          setLastDay(k)
                           setHours({
                             ...hours,
                             [k]: h.map((t, i) =>
                               i === j ? e.target.value : t,
                             ),
                           })
-                        }
+                        }}
                       />
                     ))}
                     <button

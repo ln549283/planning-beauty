@@ -1,10 +1,12 @@
 import { useEffect, useState } from 'react'
 import {
   dayName,
+  serviceLabel,
   eur,
   field,
   hour,
   link,
+  isDemo,
   message,
   rpc,
   today,
@@ -24,6 +26,8 @@ export function PublicBooking({ id }: { id: string }) {
       equipe: Member[]
     } | null>(),
     [sid, setSid] = useState(''),
+    [replacement, setReplacement] = useState(''),
+    [search, setSearch] = useState(''),
     [extras, setExtras] = useState<string[]>([]),
     [policy, setPolicy] = useState<{
       mode: string
@@ -50,7 +54,21 @@ export function PublicBooking({ id }: { id: string }) {
       })
       .catch((e) => setErr(message(e)))
   }, [id])
-  const selection = [sid, ...extras]
+  const primary = catalog?.soins.find((s) => s.id === sid)
+  const effective = replacement || sid
+  const selection = [effective, ...extras]
+  const suggestions = (primary?.suggestions || []).flatMap(
+    (id) => catalog?.soins.filter((s) => s.id === id) || [],
+  )
+  const included =
+    catalog?.soins.find((s) => s.id === effective)?.elements || []
+  const otherServices = (catalog?.soins || []).filter(
+    (s) =>
+      s.id !== sid &&
+      s.id !== replacement &&
+      !included.includes(s.id) &&
+      !suggestions.some((x) => x.id === s.id),
+  )
   const soins = selection
     .map((id) => catalog?.soins.find((s) => s.id === id))
     .filter((s) => !!s)
@@ -75,7 +93,7 @@ export function PublicBooking({ id }: { id: string }) {
     setLoading(true)
     rpc<Slot[]>('creneaux_selection', {
       i: id,
-      ids: [sid, ...extras],
+      ids: [effective, ...extras],
       jour: day,
     })
       .then((s) => {
@@ -95,7 +113,7 @@ export function PublicBooking({ id }: { id: string }) {
     return () => {
       live = false
     }
-  }, [day, sid, extras, id, revision])
+  }, [day, effective, extras, id, revision])
   return (
     <main
       className="onboard"
@@ -110,47 +128,112 @@ export function PublicBooking({ id }: { id: string }) {
           <Empty>Les réservations en ligne sont fermées.</Empty>
         ) : catalog ? (
           <>
+            {(catalog.soins.length > 6 || search) && (
+              <label>
+                Rechercher un soin
+                <input
+                  value={search}
+                  placeholder="Nom ou catégorie"
+                  onChange={(e) => setSearch(e.target.value)}
+                />
+              </label>
+            )}
             <label>
               Prestation
               <select
+                aria-label="Prestation"
                 value={sid}
                 onChange={(e) => {
                   setErr('')
                   setExtras([])
+                  setReplacement('')
                   setSid(e.target.value)
                 }}
               >
-                {catalog.soins.map((s) => (
-                  <option key={s.id} value={s.id}>
-                    {s.nom} · {s.minutes} min · {eur(s.centimes)}
-                  </option>
-                ))}
+                {catalog.soins
+                  .filter(
+                    (s) =>
+                      s.id === sid ||
+                      serviceLabel(s)
+                        .toLocaleLowerCase()
+                        .includes(search.toLocaleLowerCase()),
+                  )
+                  .map((s) => (
+                    <option key={s.id} value={s.id}>
+                      {serviceLabel(s)} · {s.minutes} min · {eur(s.centimes)}
+                    </option>
+                  ))}
               </select>
             </label>
-            {catalog.soins.length > 1 && (
-              <details>
-                <summary>Ajouter des soins à la suite</summary>
-                {catalog.soins
-                  .filter((s) => s.id !== sid)
-                  .map((s) => (
+            {primary && suggestions.length > 0 && (
+              <fieldset>
+                <legend>Pour compléter votre soin</legend>
+                {suggestions.map((s) => {
+                  const swap = primary.remplacements.includes(s.id)
+                  const delta = swap
+                    ? s.centimes - primary.centimes
+                    : s.centimes
+                  const time = swap ? s.minutes - primary.minutes : s.minutes
+                  if (!swap && included.includes(s.id)) return null
+                  return (
                     <label className="check" key={s.id}>
                       <input
                         type="checkbox"
-                        checked={extras.includes(s.id)}
-                        onChange={(e) =>
-                          setExtras(
-                            e.target.checked
-                              ? [...extras, s.id]
-                              : extras.filter((id) => id !== s.id),
-                          )
+                        checked={
+                          swap ? replacement === s.id : extras.includes(s.id)
                         }
+                        onChange={(e) => {
+                          if (swap) {
+                            setReplacement(e.target.checked ? s.id : '')
+                            if (e.target.checked)
+                              setExtras(
+                                extras.filter(
+                                  (id) =>
+                                    id !== s.id && !s.elements.includes(id),
+                                ),
+                              )
+                          } else {
+                            setExtras(
+                              e.target.checked
+                                ? [...extras, s.id]
+                                : extras.filter((x) => x !== s.id),
+                            )
+                          }
+                        }}
                       />
-                      {s.nom} · {s.minutes} min · {eur(s.centimes)}
+                      {swap ? 'Passer à la formule' : 'Ajouter'}{' '}
+                      {serviceLabel(s)} · {delta > 0 ? '+' : ''}
+                      {eur(delta)} ·{' '}
+                      {time === 0
+                        ? 'même durée'
+                        : (time > 0 ? '+' : '') + time + ' min'}
                     </label>
-                  ))}
+                  )
+                })}
+              </fieldset>
+            )}
+            {otherServices.length > 0 && (
+              <details>
+                <summary>Ajouter des soins à la suite</summary>
+                {otherServices.map((s) => (
+                  <label className="check" key={s.id}>
+                    <input
+                      type="checkbox"
+                      checked={extras.includes(s.id)}
+                      onChange={(e) =>
+                        setExtras(
+                          e.target.checked
+                            ? [...extras, s.id]
+                            : extras.filter((id) => id !== s.id),
+                        )
+                      }
+                    />
+                    {serviceLabel(s)} · {s.minutes} min · {eur(s.centimes)}
+                  </label>
+                ))}
               </details>
             )}
-            {extras.length > 0 && (
+            {(extras.length > 0 || replacement) && (
               <p>
                 {duration} min de soins · {eur(price)}
               </p>
@@ -255,7 +338,9 @@ export function PublicBooking({ id }: { id: string }) {
                       n: field(f, 'nom'),
                       email: field(f, 'email'),
                     })
-                    location.assign(link('rdv', token))
+                    location.assign(
+                      isDemo ? '#rdv=' + token : link('rdv', token),
+                    )
                   } catch (e) {
                     if (message(e).includes('indisponible'))
                       refresh((v) => v + 1)

@@ -40,6 +40,8 @@ import {
   rpc,
   today,
   theme,
+  serviceLabel,
+  type Client,
   type Institute,
   type State,
 } from './data'
@@ -84,6 +86,7 @@ export function Workspace({
     ),
     [err, setErr] = useState(''),
     [menu, setMenu] = useState(false)
+  const [bookingClient, setBookingClient] = useState<Client>()
   const generation = useRef(0)
   const reload = useCallback(async () => {
     const attempt = ++generation.current
@@ -118,6 +121,7 @@ export function Workspace({
   )
   const props = s ? { a, s, user, reload } : null
   function navigate(p: string) {
+    setBookingClient(undefined)
     setPage(p)
     setMenu(false)
   }
@@ -209,7 +213,9 @@ export function Workspace({
         {props && s ? (
           <>
             {page === 'Mon profil' && <Profile defaults={defaults} />}
-            {page === 'Agenda' && <Agenda {...props} />}
+            {page === 'Agenda' && (
+              <Agenda {...props} initialClient={bookingClient} />
+            )}
             {page === 'Prestations' && <Services {...props} />}
             {page === 'Équipe' && (
               <>
@@ -241,7 +247,15 @@ export function Workspace({
               </>
             )}
             {page === 'Préparer ma journée' && <Prepare {...props} />}
-            {page === 'Clientes' && <Clients {...props} />}
+            {page === 'Clientes' && (
+              <Clients
+                {...props}
+                book={(c) => {
+                  navigate('Agenda')
+                  setBookingClient(c)
+                }}
+              />
+            )}
             {page === 'Tableau de bord' && owner && <Stats {...props} />}
             {page === 'Agenda' && !isDemo && owner && !a.ouvert && (
               <section className="setup">
@@ -265,8 +279,8 @@ export function Workspace({
             {page === 'Agenda' && a.ouvert && (
               <a
                 className="public-link"
-                href={link('reservation', a.id)}
-                target="_blank"
+                href={isDemo ? '#reservation' : link('reservation', a.id)}
+                target={isDemo ? '_self' : '_blank'}
                 rel="noreferrer"
               >
                 Page de réservation cliente ↗
@@ -352,82 +366,104 @@ function Prepare({ a, s, user }: PageProps) {
     </>
   )
 }
-function Clients({ a, s, user, reload }: PageProps) {
+function Clients({
+  a,
+  s,
+  user,
+  reload,
+  book,
+}: PageProps & { book: (c: Client) => void }) {
   const [q, setQ] = useState(''),
     [id, setId] = useState('')
   const person = s.clients.find((c) => c.id === id)
   return (
     <>
       <Heading title="Clientes" />
-      <section className="panel pad">
-        <label>
-          Rechercher une cliente
-          <input
-            value={q}
-            onChange={(e) => setQ(e.target.value)}
-            placeholder="Nom ou adresse e-mail"
-          />
-        </label>
-        {!s.clients.length && (
-          <Empty>
-            Les fiches clientes apparaîtront dès le premier rendez-vous.
-          </Empty>
-        )}
-        {s.clients
-          .filter((c) =>
-            (c.nom + ' ' + (c.email || ''))
-              .toLowerCase()
-              .includes(q.toLowerCase()),
-          )
-          .map((c) => (
-            <button className="listrow" onClick={() => setId(c.id)} key={c.id}>
-              <strong>{c.nom}</strong>
-              <span>{c.email}</span>
-              <ChevronDown size={16} />
-            </button>
-          ))}
-      </section>
-      {person && (
-        <section className="paper">
-          <h2>{person.nom}</h2>
-          <p>{person.email}</p>
-          <Notes key={person.id} client={person} reload={reload} />
-          {a.offre === 'Premium' &&
-            s.members.some(
-              (m) => m.personne === user && m.role === 'gerante',
-            ) && <Loyalty key={'points' + person.id} client={person.id} />}
-          <h3>Historique</h3>
-          {s.visits
-            .filter((v) => v.cliente_id === id)
-            .sort((a, b) => b.debut.localeCompare(a.debut))
-            .map((v) => (
-              <p key={v.id}>
-                {dayName(v.debut.slice(0, 10))} · {v.libelle} · {v.statut}
-              </p>
-            ))}
-          {s.members.some(
-            (m) => m.role === 'gerante' && m.personne === user,
-          ) && (
-            <p>
-              Crédit disponible ·{' '}
-              {eur(
-                s.money
-                  .filter((m) => m.cliente === id)
-                  .reduce(
-                    (n, m) =>
-                      n +
-                      (m.type === 'crédit accordé'
-                        ? m.centimes
-                        : m.type === 'crédit utilisé'
-                          ? -m.centimes
-                          : 0),
-                    0,
-                  ),
-              )}
-            </p>
+      <div className={'clients-layout ' + (person ? 'client-selected' : '')}>
+        <section className="panel pad client-list">
+          <label>
+            Rechercher une cliente
+            <input
+              value={q}
+              onChange={(e) => setQ(e.target.value)}
+              placeholder="Nom ou adresse e-mail"
+            />
+          </label>
+          {!s.clients.length && (
+            <Empty>
+              Les fiches clientes apparaîtront dès le premier rendez-vous.
+            </Empty>
           )}
+          {s.clients
+            .filter((c) =>
+              (c.nom + ' ' + (c.email || ''))
+                .toLowerCase()
+                .includes(q.toLowerCase()),
+            )
+            .map((c) => (
+              <button
+                aria-pressed={id === c.id}
+                className="listrow"
+                onClick={() => setId(c.id)}
+                key={c.id}
+              >
+                <strong>{c.nom}</strong>
+                <span>{c.email}</span>
+                <ChevronDown size={16} />
+              </button>
+            ))}
         </section>
-      )}
+        {person && (
+          <section className="paper client-detail">
+            <button className="back-clients" onClick={() => setId('')}>
+              Retour aux clientes
+            </button>
+            <h2>{person.nom}</h2>
+            <p>{person.email}</p>
+            <button onClick={() => book(person)}>Prendre rendez-vous</button>
+            <Notes key={person.id} client={person} reload={reload} />
+            {a.offre === 'Premium' &&
+              s.members.some(
+                (m) => m.personne === user && m.role === 'gerante',
+              ) && <Loyalty key={'points' + person.id} client={person.id} />}
+            <h3>Historique</h3>
+            {s.visits
+              .filter((v) => v.cliente_id === id)
+              .sort((a, b) => b.debut.localeCompare(a.debut))
+              .map((v) => (
+                <p key={v.id}>
+                  {dayName(v.debut.slice(0, 10))} · {v.libelle} · {v.statut}
+                </p>
+              ))}
+            {s.members.some(
+              (m) => m.role === 'gerante' && m.personne === user,
+            ) && (
+              <p>
+                Crédit disponible ·{' '}
+                {eur(
+                  s.money
+                    .filter((m) => m.cliente === id)
+                    .reduce(
+                      (n, m) =>
+                        n +
+                        (m.type === 'crédit accordé'
+                          ? m.centimes
+                          : m.type === 'crédit utilisé'
+                            ? -m.centimes
+                            : 0),
+                      0,
+                    ),
+                )}
+              </p>
+            )}
+          </section>
+        )}
+        {!person && !!s.clients.length && (
+          <p className="client-prompt">
+            Sélectionnez une cliente pour ouvrir sa fiche.
+          </p>
+        )}
+      </div>
     </>
   )
 }
@@ -593,7 +629,7 @@ function Stats({ a, s }: PageProps) {
             <option value="">Toutes les prestations</option>
             {s.services.map((v) => (
               <option key={v.id} value={v.id}>
-                {v.nom}
+                {serviceLabel(v)}
               </option>
             ))}
           </select>

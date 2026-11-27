@@ -41,6 +41,9 @@ export type Member = {
   horaires: Record<string, string[]>
 }
 export type Service = {
+  sous_categorie: string
+  suggestions: string[]
+  remplacements: string[]
   composition_libre: string
   categorie: string
   id: string
@@ -57,6 +60,7 @@ export type Visit = {
   id: string
   personne: string
   cliente_id: string
+  soins_selection: string[]
   soin_id: string
   libelle: string
   preparation: string
@@ -108,7 +112,20 @@ export type Waiting = {
   soin: string
   jour: string
 }
+export type CategoryColor = {
+  id: string
+  categorie: string
+  sous_categorie: string
+  couleur: string
+}
+export const categoryPath = (s: {
+  categorie: string
+  sous_categorie: string
+}) => [s.categorie, s.sous_categorie].filter(Boolean).join(' › ')
+export const serviceLabel = (s: Service) =>
+  [s.nom, categoryPath(s)].filter(Boolean).join(' — ')
 export type State = {
+  colors: CategoryColor[]
   members: Member[]
   services: Service[]
   visits: Visit[]
@@ -155,6 +172,7 @@ export async function loadState(i: string): Promise<State> {
     money,
     exceptions,
     waiting,
+    colors,
   ] = await Promise.all([
     rows<Member>('equipe', i),
     rows<Service>('soins', i),
@@ -165,6 +183,7 @@ export async function loadState(i: string): Promise<State> {
     rows<Movement>('mouvements', i),
     rows<ExceptionDay>('exceptions_horaires', i),
     rows<Waiting>('attente', i),
+    rows<CategoryColor>('couleurs_categories', i),
   ])
   return {
     members,
@@ -176,6 +195,7 @@ export async function loadState(i: string): Promise<State> {
     money,
     exceptions,
     waiting,
+    colors,
   }
 }
 export const eur = (n: number) =>

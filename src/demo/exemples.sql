@@ -11,7 +11,7 @@ declare
 begin
  insert into public.equipe(institut_id,personne,nom,role) values(i,equipe[2],'Inès','responsable'),(i,equipe[3],'Léa','employee');
  update public.instituts set horaires=(select jsonb_object_agg(n::text,'["08:00","12:00","13:00","18:00"]'::jsonb) from generate_series(1,7)n),
- fidelite_seuil=100,fidelite_cadeau='Un soin offert' where id=i;
+ ouvert=true, fidelite_seuil=100,fidelite_cadeau='Un soin offert' where id=i;
  for article in select * from (values
  (1,'Fil','Sourcils',15,1000),(2,'Fil','Lèvres',10,800),(3,'Fil','Sourcils + Lèvres',15,1800),
  (4,'Fil','Sourcils + Lèvres + Menton',20,2500),(5,'Fil','Sourcils + Lèvres + Tempes',20,2500),
@@ -24,16 +24,18 @@ begin
  (19,'Cire classique','Aisselles + Demi-jambes + Maillot intégral',45,5500),(20,'Cire classique','Torse / Dos / Ventre',15,2000)
  ) as liste(num,technique,nom,minutes,centimes) order by num loop
  sid:=gen_random_uuid();
- perform public.enregistrer_fiche_soin(i,sid,article.nom||' · '||article.technique,article.minutes,article.centimes,
+ perform public.enregistrer_fiche_soin(i,sid,article.nom,article.minutes,article.centimes,
  case article.num when 3 then array[ids_soins[1],ids_soins[2]] when 19 then array[ids_soins[12],ids_soins[13],ids_soins[16]] else '{}'::uuid[] end,
- '{}',case when article.technique='Fil' then E'Fil de coton\nCompresses' else E'Cire classique\nSpatules\nCompresses' end,true,true,'Épilations '||case when article.technique='Fil' then 'au fil' else 'à la cire classique' end);
+ '{}',case when article.technique='Fil' then E'Fil de coton\nCompresses' else E'Cire classique\nSpatules\nCompresses' end,true,true,'Épilations');
+ update public.soins set sous_categorie=article.technique where id=sid;
  ids_soins:=array_append(ids_soins,sid);
  end loop;
  update public.soins set composition_libre='Sourcils, lèvres, menton' where id=ids_soins[4];
  update public.soins set composition_libre='Sourcils, lèvres, tempes' where id=ids_soins[5];
  update public.soins set elements=array[ids_soins[6],ids_soins[9]] where id=ids_soins[8];
+ update public.soins set suggestions=array[ids_soins[3],ids_soins[2]],remplacements=array[ids_soins[3]] where id=ids_soins[1];
  for idx in 1..cardinality(noms) loop
- insert into public.clientes(institut_id,nom,email) values(i,noms[idx],format('cliente%s@example.test',idx)) returning id into c;
+ insert into public.clientes(institut_id,nom,email) values(i,noms[idx]||' '||(array['Hoarau','Payet','Robert','Rivière'])[1+(idx%4)],format('cliente%s@example.test',idx)) returning id into c;
  clientes:=array_append(clientes,c);
  end loop;
  perform public.enregistrer_profil('Julie','Lagon','Non précisé',null,'','','','','');

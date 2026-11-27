@@ -587,6 +587,137 @@ grant usage on schema auth to authenticated,anon; grant usage on schema public t
       .rows[0].en_ligne,
     false,
   )
+  const brows = crypto.randomUUID(),
+    lips = crypto.randomUUID(),
+    bundle = crypto.randomUUID()
+  const configure = (
+    id,
+    name,
+    sub,
+    duration,
+    price,
+    parts = [],
+    suggestions = [],
+    replace = [],
+    online = true,
+  ) =>
+    fn(
+      u.c,
+      'configurer_soin',
+      i,
+      id,
+      name,
+      duration,
+      price,
+      parts,
+      [],
+      '',
+      online,
+      true,
+      'Épilations',
+      sub,
+      '',
+      suggestions,
+      replace,
+    )
+  await configure(lips, 'Lèvres', 'Fil', 10, 800)
+  await configure(brows, 'Sourcils', 'Fil', 15, 1000)
+  await configure(bundle, 'Duo', 'Fil', 15, 1800, [brows, lips])
+  await configure(
+    brows,
+    'Sourcils',
+    'Fil',
+    15,
+    1000,
+    [],
+    [bundle, lips],
+    [bundle],
+  )
+  const catalogue = () => fn(anon, 'catalogue_public', i)
+  const item = (await catalogue()).soins.find((x) => x.id === brows)
+  assert.deepEqual(item.suggestions, [bundle, lips])
+  assert.deepEqual(item.remplacements, [bundle])
+  assert.equal(item.sous_categorie, 'Fil')
+  await configure(lips, 'Lèvres', 'Fil', 10, 800, [], [], [], false)
+  assert.deepEqual(
+    (await catalogue()).soins.find((x) => x.id === brows).suggestions,
+    [bundle],
+  )
+  const rows = await u.c.query(
+    "select * from couleurs_categories where institut_id=$1 and categorie='Épilations'",
+    [i],
+  )
+  assert.equal(rows.rowCount, 2)
+  assert.equal(new Set(rows.rows.map((c) => c.couleur)).size, 2)
+  await fn(u.c, 'colorer_categorie', i, rows.rows[0].id, '#115533')
+  await assert.rejects(
+    fn(other.c, 'colorer_categorie', i, rows.rows[0].id, '#ffffff'),
+  )
+  await assert.rejects(
+    configure(brows, 'Sourcils', 'Fil', 15, 1000, [], [sid], [sid]),
+  )
+  const day = new Date(Date.now() + 18 * 864e5).toISOString().slice(0, 10)
+  const args = [i, u.id, [bundle], day]
+  assert(
+    (
+      await u.c.query(
+        'select * from public.creneaux_comptoir($1,$2,$3,$4,1)',
+        args,
+      )
+    ).rowCount > 1,
+  )
+  assert.equal(
+    (
+      await u.c.query(
+        'select * from public.creneaux_comptoir($1,$2,$3,$4,5)',
+        args,
+      )
+    ).rowCount,
+    5,
+  )
+  await assert.rejects(fn(e.c, 'creneaux_comptoir', ...args, 1))
+  await assert.rejects(fn(anon, 'creneaux_comptoir', ...args, 1))
+  const clientId = (
+    await root.query(
+      "insert into public.clientes(institut_id,nom) values($1,'Camille Payet') returning id",
+      [i],
+    )
+  ).rows[0].id
+  const atDesk = (c) =>
+    fn(
+      c,
+      'reserver_comptoir',
+      i,
+      u.id,
+      [bundle],
+      day + 'T09:30',
+      clientId,
+      '',
+      '',
+    )
+  const visit = await atDesk(m.c)
+  await assert.rejects(atDesk(m.c))
+  const booked = (
+    await root.query('select * from rendez_vous where id=$1', [visit])
+  ).rows[0]
+  assert.equal(booked.cliente_id, clientId)
+  assert.equal(booked.statut, 'confirmé')
+  assert.equal(booked.origine, 'institut')
+  assert.equal(booked.avance, 0)
+  assert.equal(booked.minutes + booked.marge, 20)
+  assert.equal(booked.centimes, 1800)
+  assert.equal(
+    (
+      await u.c.query(
+        'select from public.creneaux_comptoir($1,$2,$3,$4,1) where debut=$5',
+        [...args, day + 'T09:30'],
+      )
+    ).rowCount,
+    0,
+  )
+  console.log(
+    'OK · suggestions ordonnées, formule de remplacement, couleurs, disponibilités et reprise sans acompte.',
+  )
   await assert.rejects(fn(m.c, 'transferer_gerance', i, u.id))
   await assert.rejects(fn(u.c, 'transferer_gerance', i, other.id))
   await fn(u.c, 'transferer_gerance', i, m.id)

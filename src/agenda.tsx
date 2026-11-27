@@ -21,6 +21,9 @@ import {
   type State,
   type Visit,
 } from './data'
+import { MonthGrid, shiftMonth } from './MonthGrid'
+import { StaffDates } from './StaffDates'
+import { serviceLabel, categoryPath, type Client } from './data'
 import { Dialog, Empty, Form, Heading } from './ui'
 export type PageProps = {
   a: Institute
@@ -28,17 +31,41 @@ export type PageProps = {
   user: string
   reload: () => Promise<void>
 }
-export function Agenda({ a, s, user, reload }: PageProps) {
+export function Agenda({
+  a,
+  s,
+  user,
+  reload,
+  initialClient,
+}: PageProps & { initialClient?: Client }) {
+  function availableServices(member: string) {
+    const permitted = (x: State['services'][number]) =>
+      !x.habilitations.length || x.habilitations.includes(member)
+    return s.services.filter(
+      (x) =>
+        x.actif &&
+        permitted(x) &&
+        x.elements.every((id) => {
+          const part = s.services.find((service) => service.id === id)
+          return !!part && permitted(part)
+        }),
+    )
+  }
+  const [search, setSearch] = useState('')
   const [day, setDay] = useState(today()),
     [view, setView] = useState(innerWidth < 720 ? 'Jour' : 'Semaine'),
     [who, setWho] = useState(user),
     [bookMember, setBookMember] = useState(user),
     [force, setForce] = useState(false),
-    [modal, setModal] = useState(''),
-    [picked, setPicked] = useState(''),
+    [modal, setModal] = useState(initialClient ? 'visit' : ''),
+    [client, setClient] = useState(initialClient),
+    [serviceIds, setServiceIds] = useState<string[]>([
+      availableServices(user)[0]?.id || '',
+    ]),
+    [picked, setPicked] = useState(today() + 'T09:00'),
     [v, setV] = useState<Visit>()
   const me = s.members.find((m) => m.personne === user),
-    manager = me?.role !== 'employee'
+    manager = me?.role === 'gerante' || me?.role === 'responsable'
   const monday = dayAdd(day, 1 - isoDay(day))
   const days =
     view === 'Jour'
@@ -82,8 +109,24 @@ export function Agenda({ a, s, user, reload }: PageProps) {
     Math.max(18 * 60, ...openings, ...visits.map((x) => minutes(hour(x.fin)))) /
       60,
   )
-  function booking(d = day, t = '09:00', p = who === 'all' ? user : who) {
+  function booking(
+    d = day,
+    t = '09:00',
+    p = who === 'all' ? user : who,
+    repeat?: Visit,
+  ) {
+    setClient(
+      repeat ? s.clients.find((c) => c.id === repeat.cliente_id) : undefined,
+    )
+    setServiceIds(
+      repeat
+        ? repeat.soins_selection?.length
+          ? repeat.soins_selection
+          : [repeat.soin_id]
+        : [availableServices(p)[0]?.id || ''],
+    )
     setForce(false)
+    setSearch('')
     setBookMember(p)
     setPicked(d + 'T' + t)
     setModal('visit')
@@ -124,6 +167,28 @@ export function Agenda({ a, s, user, reload }: PageProps) {
         ),
     )
   }
+  const month = day.slice(0, 7)
+  const counts = new Map<string, number>()
+  for (const v of s.visits) {
+    if (
+      (who === 'all' || v.personne === who) &&
+      !['annulé', 'expiré'].includes(v.statut) &&
+      !(
+        v.statut === 'en paiement' &&
+        v.echeance &&
+        Date.parse(v.echeance) <= Date.now()
+      )
+    ) {
+      const d = v.debut.slice(0, 10)
+      counts.set(d, (counts.get(d) || 0) + 1)
+    }
+  }
+  function step(n: number) {
+    if (view === 'Mois' || view === 'Année')
+      setDay(shiftMonth(month, n * (view === 'Année' ? 12 : 1)) + '-01')
+    else setDay(dayAdd(day, n * (view === 'Jour' ? 1 : 7)))
+  }
+  const eligible = availableServices(bookMember)
   return (
     <>
       <Heading title="Agenda">
@@ -146,33 +211,40 @@ export function Agenda({ a, s, user, reload }: PageProps) {
             <button
               className="icon"
               aria-label="Période précédente"
-              onClick={() => setDay(dayAdd(day, view === 'Jour' ? -1 : -7))}
+              onClick={() => step(-1)}
             >
               <ChevronLeft />
             </button>
             <button
               className="icon"
               aria-label="Période suivante"
-              onClick={() => setDay(dayAdd(day, view === 'Jour' ? 1 : 7))}
+              onClick={() => step(1)}
             >
               <ChevronRight />
             </button>
-            <strong>
-              {view === 'Jour'
-                ? dayName(day)
-                : dayName(monday, { day: 'numeric', month: 'short' }) +
-                  ' – ' +
-                  dayName(days[6], {
-                    day: 'numeric',
-                    month: 'long',
-                    year: 'numeric',
-                  })}
-            </strong>
+            <button
+              className="period-button"
+              onClick={() => setView(view === 'Mois' ? 'Année' : 'Mois')}
+            >
+              {view === 'Année'
+                ? day.slice(0, 4)
+                : view === 'Mois'
+                  ? dayName(day, { month: 'long', year: 'numeric' })
+                  : view === 'Jour'
+                    ? dayName(day)
+                    : dayName(monday, { day: 'numeric', month: 'short' }) +
+                      ' – ' +
+                      dayName(days[6], {
+                        day: 'numeric',
+                        month: 'long',
+                        year: 'numeric',
+                      })}
+            </button>
           </div>
           <div className="actions">
             <button onClick={() => setDay(today())}>Aujourd’hui</button>
             <div className="toggle">
-              {['Jour', 'Semaine'].map((x) => (
+              {['Jour', 'Semaine', 'Mois', 'Année'].map((x) => (
                 <button
                   key={x}
                   className={view === x ? 'on' : ''}
@@ -195,7 +267,7 @@ export function Agenda({ a, s, user, reload }: PageProps) {
               <option value="all">Toute l’équipe</option>
             )}
             {s.members
-              .filter((m) => m.actif)
+              .filter((m) => m.actif && (manager || m.personne === user))
               .map((m) => (
                 <option key={m.personne} value={m.personne}>
                   {m.nom}
@@ -209,122 +281,178 @@ export function Agenda({ a, s, user, reload }: PageProps) {
             pour commencer à réserver.
           </div>
         )}
-        <div className="scroll">
-          <div
-            className={'calendar ' + (view === 'Semaine' ? 'week' : '')}
-            style={{
-              minWidth: who === 'all' ? 58 + 110 * columns.length : undefined,
-              gridTemplateColumns:
-                '58px repeat(' + columns.length + ', minmax(0,1fr))',
+        {view === 'Année' ? (
+          <div className="year-grid">
+            {Array.from({ length: 12 }, (_, n) => {
+              const m = day.slice(0, 4) + '-' + String(n + 1).padStart(2, '0')
+              return (
+                <button
+                  key={m}
+                  onClick={() => {
+                    setDay(m + '-01')
+                    setView('Mois')
+                  }}
+                >
+                  {dayName(m + '-01', { month: 'long' })}
+                </button>
+              )
+            })}
+          </div>
+        ) : view === 'Mois' ? (
+          <MonthGrid
+            month={month}
+            selected={day}
+            counts={counts}
+            pick={(d) => {
+              setDay(d)
+              setView('Jour')
             }}
-          >
-            <div className="dayhead" />
-            {columns.map(({ d, m }) => (
-              <button
-                key={d + m.personne}
-                className={'dayhead ' + (d === today() ? 'current' : '')}
-                onClick={() => {
-                  setDay(d)
-                  setView('Jour')
-                }}
-              >
-                {dayName(d, { weekday: 'short' })}
-                <b>{d.slice(-2)}</b>
-                {who === 'all' && <small>{m.nom}</small>}
-              </button>
-            ))}
-            <div>
-              {Array.from({ length: end - start }, (_, i) => (
-                <div className="hour" key={i}>
-                  {clock((i + start) * 60)}
+          />
+        ) : (
+          <div className="scroll">
+            <div
+              className={'calendar ' + (view === 'Semaine' ? 'week' : '')}
+              style={{
+                minWidth: who === 'all' ? 58 + 110 * columns.length : undefined,
+                gridTemplateColumns:
+                  '58px repeat(' + columns.length + ', minmax(0,1fr))',
+              }}
+            >
+              <div className="dayhead" />
+              {columns.map(({ d, m }) => (
+                <button
+                  key={d + m.personne}
+                  className={'dayhead ' + (d === today() ? 'current' : '')}
+                  onClick={() => {
+                    setDay(d)
+                    setView('Jour')
+                  }}
+                >
+                  {dayName(d, { weekday: 'short' })}
+                  <b>{d.slice(-2)}</b>
+                  {who === 'all' && <small>{m.nom}</small>}
+                </button>
+              ))}
+              <div>
+                {Array.from({ length: end - start }, (_, i) => (
+                  <div className="hour" key={i}>
+                    {clock((i + start) * 60)}
+                  </div>
+                ))}
+              </div>
+              {columns.map(({ d, m }) => (
+                <div className="daycol" key={d + m.personne}>
+                  {Array.from({ length: end - start }, (_, i) => (
+                    <button
+                      className={
+                        'hour slot ' +
+                        (isOpen(d, (i + start) * 60, m.personne)
+                          ? ''
+                          : 'closed-slot')
+                      }
+                      key={i}
+                      aria-label={
+                        'Ajouter le ' + d + ' à ' + clock((i + start) * 60)
+                      }
+                      onClick={() =>
+                        booking(d, clock((i + start) * 60), m.personne)
+                      }
+                    />
+                  ))}
+                  {blocks
+                    .filter(
+                      (b) =>
+                        (!b.personnes.length ||
+                          b.personnes.includes(m.personne)) &&
+                        b.debut < dayAdd(d, 1) &&
+                        b.fin > d + 'T00:00',
+                    )
+                    .map((b) => {
+                      const from = Math.max(
+                          start * 60,
+                          b.debut.slice(0, 10) < d ? 0 : minutes(hour(b.debut)),
+                        ),
+                        to = Math.min(
+                          end * 60,
+                          b.fin.slice(0, 10) > d ? 1440 : minutes(hour(b.fin)),
+                        )
+                      return (
+                        to > from && (
+                          <button
+                            className="block event"
+                            style={{
+                              top: (from / 60 - start) * 66,
+                              height: (to - from) * 1.1,
+                            }}
+                            key={b.id}
+                            onClick={() => {
+                              setPicked(b.id)
+                              setModal('unblock')
+                            }}
+                          >
+                            {b.motif}
+                          </button>
+                        )
+                      )
+                    })}
+                  {visits
+                    .filter(
+                      (v) => v.personne === m.personne && v.debut.startsWith(d),
+                    )
+                    .map((v) => {
+                      const service = s.services.find((x) => x.id === v.soin_id)
+                      const color =
+                        s.colors.find(
+                          (c) =>
+                            service &&
+                            c.categorie === service.categorie &&
+                            c.sous_categorie === service.sous_categorie,
+                        )?.couleur || a.couleur
+                      const person =
+                        s.clients.find((c) => c.id === v.cliente_id)?.nom || ''
+                      const label = [
+                        v.libelle,
+                        service && categoryPath(service),
+                      ]
+                        .filter(Boolean)
+                        .join(' — ')
+                      return (
+                        <button
+                          key={v.id}
+                          className={
+                            'event visit ' +
+                            (v.minutes + v.marge < 30 ? 'compact-visit' : '')
+                          }
+                          title={label + ' · ' + person + ' · ' + hour(v.debut)}
+                          aria-label={
+                            label + ' · ' + person + ' · ' + hour(v.debut)
+                          }
+                          style={{
+                            backgroundColor:
+                              'color-mix(in srgb, ' + color + ' 18%, white)',
+                            borderColor: color,
+                            top: (minutes(hour(v.debut)) / 60 - start) * 66,
+                            height: Math.max(17, (v.minutes + v.marge) * 1.1),
+                            borderBottomWidth: Math.min(7, v.marge),
+                          }}
+                          onClick={() => {
+                            setV(v)
+                            setModal('detail')
+                          }}
+                        >
+                          <b>{v.libelle}</b>
+                          <span>{person}</span>
+                          <small>
+                            {hour(v.debut)} · {service && categoryPath(service)}
+                          </small>
+                        </button>
+                      )
+                    })}
                 </div>
               ))}
             </div>
-            {columns.map(({ d, m }) => (
-              <div className="daycol" key={d + m.personne}>
-                {Array.from({ length: end - start }, (_, i) => (
-                  <button
-                    className={
-                      'hour slot ' +
-                      (isOpen(d, (i + start) * 60, m.personne)
-                        ? ''
-                        : 'closed-slot')
-                    }
-                    key={i}
-                    aria-label={
-                      'Ajouter le ' + d + ' à ' + clock((i + start) * 60)
-                    }
-                    onClick={() =>
-                      booking(d, clock((i + start) * 60), m.personne)
-                    }
-                  />
-                ))}
-                {blocks
-                  .filter(
-                    (b) =>
-                      (!b.personnes.length ||
-                        b.personnes.includes(m.personne)) &&
-                      b.debut < dayAdd(d, 1) &&
-                      b.fin > d + 'T00:00',
-                  )
-                  .map((b) => {
-                    const from = Math.max(
-                        start * 60,
-                        b.debut.slice(0, 10) < d ? 0 : minutes(hour(b.debut)),
-                      ),
-                      to = Math.min(
-                        end * 60,
-                        b.fin.slice(0, 10) > d ? 1440 : minutes(hour(b.fin)),
-                      )
-                    return (
-                      to > from && (
-                        <button
-                          className="block event"
-                          style={{
-                            top: (from / 60 - start) * 66,
-                            height: (to - from) * 1.1,
-                          }}
-                          key={b.id}
-                          onClick={() => {
-                            setPicked(b.id)
-                            setModal('unblock')
-                          }}
-                        >
-                          {b.motif}
-                        </button>
-                      )
-                    )
-                  })}
-                {visits
-                  .filter(
-                    (v) => v.personne === m.personne && v.debut.startsWith(d),
-                  )
-                  .map((v) => (
-                    <button
-                      key={v.id}
-                      className="event visit"
-                      style={{
-                        top: (minutes(hour(v.debut)) / 60 - start) * 66,
-                        height: Math.max(17, (v.minutes + v.marge) * 1.1),
-                        borderBottomWidth: Math.min(7, v.marge),
-                      }}
-                      onClick={() => {
-                        setV(v)
-                        setModal('detail')
-                      }}
-                    >
-                      <small>
-                        {hour(v.debut)} ·{' '}
-                        {clock(minutes(hour(v.debut)) + v.minutes)}
-                      </small>
-                      <b>{s.clients.find((c) => c.id === v.cliente_id)?.nom}</b>
-                      <span>{v.libelle}</span>
-                    </button>
-                  ))}
-              </div>
-            ))}
           </div>
-        </div>
+        )}
       </section>
       {modal === 'visit' && (
         <Dialog title="Nouveau rendez-vous" close={close}>
@@ -344,19 +472,33 @@ export function Agenda({ a, s, user, reload }: PageProps) {
                   )
                 )
                   return
-                await rpc(force ? 'reserver_exception' : 'reserver', {
-                  i: a.id,
-                  p: bookMember,
-                  sid: field(f, 'soin'),
-                  d: field(f, 'date'),
-                  n: field(f, 'nom'),
-                  email: field(f, 'email'),
-                  ...(force ? { motif: field(f, 'motif') } : { web: false }),
-                })
+                if (force)
+                  await rpc('reserver_exception', {
+                    i: a.id,
+                    p: bookMember,
+                    sid: serviceIds[0],
+                    d: field(f, 'date'),
+                    n: field(f, 'nom'),
+                    email: field(f, 'email'),
+                    motif: field(f, 'motif'),
+                  })
+                else
+                  await rpc('reserver_comptoir', {
+                    i: a.id,
+                    p: bookMember,
+                    ids: serviceIds,
+                    d: field(f, 'date'),
+                    cliente: client?.id || null,
+                    n: field(f, 'nom'),
+                    email: field(f, 'email'),
+                  })
+                setDay(field(f, 'date').slice(0, 10))
+                setView('Jour')
+                setWho(bookMember)
                 await done()
               }}
             >
-              {me?.role === 'gerante' && (
+              {me?.role === 'gerante' && !client && serviceIds.length === 1 && (
                 <>
                   <label className="check">
                     <input
@@ -379,7 +521,16 @@ export function Agenda({ a, s, user, reload }: PageProps) {
                   Professionnelle
                   <select
                     value={bookMember}
-                    onChange={(e) => setBookMember(e.target.value)}
+                    onChange={(e) => {
+                      const p = e.target.value
+                      setBookMember(p)
+                      const allowed = availableServices(p)
+                      setServiceIds(
+                        serviceIds.map((id) =>
+                          allowed.some((x) => x.id === id) ? id : '',
+                        ),
+                      )
+                    }}
                   >
                     {s.members
                       .filter((m) => m.actif)
@@ -391,40 +542,129 @@ export function Agenda({ a, s, user, reload }: PageProps) {
                   </select>
                 </label>
               )}
-              <label>
-                Prestation
-                <select name="soin" required>
-                  {s.services
-                    .filter(
-                      (x) =>
-                        x.actif &&
-                        (!x.habilitations.length ||
-                          x.habilitations.includes(bookMember)),
-                    )
-                    .map((x) => (
-                      <option key={x.id} value={x.id}>
-                        {x.nom} · {x.minutes} min · {eur(x.centimes)}
-                      </option>
-                    ))}
-                </select>
-              </label>
+              {eligible.length > 6 && (
+                <label>
+                  Rechercher une prestation
+                  <input
+                    value={search}
+                    onChange={(e) => setSearch(e.target.value)}
+                    placeholder="Nom ou catégorie"
+                  />
+                </label>
+              )}
+              {serviceIds.map((id, index) => (
+                <label key={index}>
+                  {index === 0 ? 'Prestation' : 'Soin suivant'}
+                  <select
+                    required
+                    name={index === 0 ? 'soin' : undefined}
+                    value={eligible.some((x) => x.id === id) ? id : ''}
+                    onChange={(e) =>
+                      setServiceIds(
+                        serviceIds.map((v, k) =>
+                          k === index ? e.target.value : v,
+                        ),
+                      )
+                    }
+                  >
+                    <option value="">Choisir une prestation</option>
+                    {eligible
+                      .filter(
+                        (x) =>
+                          x.id === id ||
+                          serviceLabel(x)
+                            .toLocaleLowerCase()
+                            .includes(search.toLocaleLowerCase()),
+                      )
+                      .map((x) => (
+                        <option key={x.id} value={x.id}>
+                          {serviceLabel(x)} · {x.minutes} min ·{' '}
+                          {eur(x.centimes)}
+                        </option>
+                      ))}
+                  </select>
+                  {index > 0 && (
+                    <button
+                      type="button"
+                      onClick={() =>
+                        setServiceIds(serviceIds.filter((_, k) => k !== index))
+                      }
+                    >
+                      Retirer ce soin
+                    </button>
+                  )}
+                </label>
+              ))}
+              {!force && serviceIds.length < 20 && (
+                <button
+                  type="button"
+                  onClick={() => setServiceIds([...serviceIds, ''])}
+                >
+                  Ajouter un soin
+                </button>
+              )}
+              {!force &&
+                picked.length >= 16 &&
+                serviceIds.every((id) => eligible.some((x) => x.id === id)) && (
+                  <StaffDates
+                    institute={a.id}
+                    member={bookMember}
+                    ids={serviceIds}
+                    value={picked}
+                    change={setPicked}
+                  />
+                )}
               <label>
                 Date et heure
                 <input
                   type="datetime-local"
                   name="date"
                   required
-                  defaultValue={picked}
+                  value={picked}
+                  onChange={(e) => setPicked(e.target.value)}
                 />
               </label>
               <label>
-                Nom de la cliente
-                <input required name="nom" maxLength={120} />
+                Fiche cliente
+                <select
+                  value={client?.id || ''}
+                  onChange={(e) => {
+                    setClient(s.clients.find((c) => c.id === e.target.value))
+                    setForce(false)
+                  }}
+                >
+                  <option value="">Saisir les coordonnées</option>
+                  {s.clients.map((c) => (
+                    <option key={c.id} value={c.id}>
+                      {c.nom}
+                      {c.email ? ' · ' + c.email : ''}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <label>
+                Nom et prénom de la cliente
+                <input
+                  required
+                  name="nom"
+                  maxLength={120}
+                  key={client?.id || 'new'}
+                  defaultValue={client?.nom}
+                  readOnly={!!client}
+                />
               </label>
               <label>
                 E-mail de la cliente
-                <input type="email" name="email" list="known" />
+                <input
+                  type="email"
+                  name="email"
+                  list="known"
+                  key={client?.id || 'new'}
+                  defaultValue={client?.email || ''}
+                  readOnly={!!client}
+                />
               </label>
+              <small>Rendez-vous confirmé sans acompte au comptoir.</small>
               <datalist id="known">
                 {s.clients
                   .filter((c) => c.email)
@@ -452,13 +692,15 @@ export function Agenda({ a, s, user, reload }: PageProps) {
               try {
                 await rpc('bloquer', { ...args, confirmer: false })
               } catch (e) {
-                if (!(
-                  e instanceof Error &&
-                  e.message.includes('déjà confirmés') &&
-                  confirm(
-                    'Des rendez-vous existent. Maintenir le blocage et les conserver ?',
+                if (
+                  !(
+                    e instanceof Error &&
+                    e.message.includes('déjà confirmés') &&
+                    confirm(
+                      'Des rendez-vous existent. Maintenir le blocage et les conserver ?',
+                    )
                   )
-                ))
+                )
                   throw e
                 await rpc('bloquer', { ...args, confirmer: true })
               }
@@ -526,6 +768,28 @@ export function Agenda({ a, s, user, reload }: PageProps) {
       )}
       {modal === 'detail' && v && (
         <Dialog title={v.libelle} close={close}>
+          {['confirmé', 'réalisé'].includes(v.statut) && (
+            <button
+              className="primary"
+              onClick={() =>
+                booking(
+                  dayAdd(
+                    v.debut.slice(0, 10) > today()
+                      ? v.debut.slice(0, 10)
+                      : today(),
+                    1,
+                  ),
+                  hour(v.debut),
+                  s.members.some((m) => m.actif && m.personne === v.personne)
+                    ? v.personne
+                    : user,
+                  v,
+                )
+              }
+            >
+              Reprendre rendez-vous
+            </button>
+          )}
           <VisitDetail {...{ a, s, v, user, reload: done }} />
         </Dialog>
       )}
@@ -648,7 +912,7 @@ function VisitDetail({ s, v, user, reload }: PageProps & { v: Visit }) {
                     .filter((x) => x.actif || x.id === v.soin_id)
                     .map((x) => (
                       <option key={x.id} value={x.id}>
-                        {x.nom}
+                        {serviceLabel(x)}
                       </option>
                     ))}
                 </select>

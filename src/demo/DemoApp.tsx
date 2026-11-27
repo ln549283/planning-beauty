@@ -1,9 +1,16 @@
 import { useEffect, useState } from 'react'
 import { message, rows, type Institute } from '../data'
+import { PublicBooking, ManageBooking } from '../public'
 import { Workspace } from '../workspace'
 import { Brand } from '../ui'
 
 export default function DemoApp() {
+  const [screen, setScreen] = useState(location.hash.slice(1))
+  useEffect(() => {
+    const read = () => setScreen(location.hash.slice(1))
+    window.addEventListener('hashchange', read)
+    return () => window.removeEventListener('hashchange', read)
+  }, [])
   const [institute, setInstitute] = useState<Institute>(),
     [error, setError] = useState('')
   async function refresh() {
@@ -28,6 +35,19 @@ export default function DemoApp() {
           <a href="/">Retour à la connexion</a>
         </article>
       </main>
+    )
+  if (screen === 'reservation' || screen.startsWith('rdv='))
+    return (
+      <>
+        <a className="demo-back" href="#">
+          ← Agenda de démonstration
+        </a>
+        {screen === 'reservation' ? (
+          <PublicBooking id={institute.id} />
+        ) : (
+          <ManageBooking token={screen.slice(4)} />
+        )}
+      </>
     )
   return (
     <Workspace
